@@ -4,6 +4,8 @@ Transparent Ollama proxy with live request/response monitoring dashboard.
 
 Intercepts all requests to Ollama, logs them in real-time, and displays them in a group-by-prompt dashboard with tool call matching, streaming visibility, and duration tracking.
 
+![Ollama Flow Visualizer dashboard](docs/screenshots/dashboard.png)
+
 ## Features
 
 - **Transparent proxy** — sits between OpenClaw (or any OpenAI-compatible client) and Ollama. No client-side changes needed.
@@ -169,8 +171,6 @@ The key parts:
 Now OpenClaw sends all requests through the proxy, and they appear on the dashboard at `http://<proxy-host>:8080`.
 
 ## Dashboard
-
-![Ollama Flow Visualizer dashboard](docs/screenshots/dashboard.png)
 
 Open `http://<proxy-host>:8080` in any browser.
 
