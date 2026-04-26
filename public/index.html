@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ollama Flow Visualizer</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'JetBrains Mono','Fira Code','Courier New',monospace;background:#0a0e14;color:#c5c8c6;height:100vh;overflow-y:auto}
+    .header{padding:10px 24px;background:#151921;border-bottom:1px solid #2a2e35;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10}
+    .header h1{font-size:1rem;color:#7ec8e3;display:flex;align-items:center;gap:10px}
+    .header h1 .dot{width:10px;height:10px;border-radius:50%;background:#50fa7b;display:inline-block;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .header .ctrls{display:flex;gap:8px;align-items:center}
+    .header button{padding:4px 12px;border:1px solid #2a2e35;border-radius:4px;background:#1a1e24;color:#8b949e;cursor:pointer;font-family:inherit;font-size:.75rem;transition:.15s}
+    .header button:hover{background:#2a2e35;color:#c5c8c6}
+    #summary{font-size:.75rem;color:#6a6e75;white-space:nowrap}
+    #summaryBar{padding:8px 24px;background:#0d1117;border-bottom:1px solid #1a1e24;display:flex;gap:20px;font-size:.75rem;color:#6a6e75;flex-wrap:wrap}
+    #summaryBar .seg{display:flex;align-items:center;gap:5px}
+    .group{border-bottom:1px solid #1a1e24}
+    .g-hdr{display:flex;align-items:center;padding:10px 24px;cursor:pointer;gap:12px;flex-wrap:wrap;transition:background .15s}
+    .g-hdr:hover{background:#151921}
+    .g-hdr .arrow{color:#6272a4;font-size:.7rem;transition:transform .2s;flex-shrink:0}
+    .g-hdr.expanded .arrow{transform:rotate(90deg)}
+    .g-hdr .prompt{color:#8b949e;font-size:.82rem;flex:1;min-width:200px;max-width:100%;line-height:1.4;word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .g-hdr .ctx{border-left:2px solid #2a2e35;padding-left:10px;color:#6272a4;font-size:.72rem;flex-shrink:0;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .g-hdr .ts{color:#6a6e75;font-size:.7rem;flex-shrink:0}
+    .g-hdr .status{font-size:.75rem;padding:2px 8px;border-radius:3px;flex-shrink:0;font-weight:600}
+    .g-hdr .status.active{background:#292a33;color:#f1fa8c;border:1px solid #f1fa8c44}
+    .g-hdr .status.complete{background:#1a2a1a;color:#50fa7b;border:1px solid #50fa7b44}
+    .g-hdr .status.error{background:#2a1a1a;color:#ff5555;border:1px solid #ff555544}
+    .g-hdr .count{font-size:.7rem;color:#6272a4;flex-shrink:0}
+    .g-hdr .dur{font-size:.75rem;color:#bd93f9;flex-shrink:0;font-weight:600}
+    .g-hdr .tools-badge{font-size:.65rem;color:#ffa657;background:#2a1e10;padding:1px 6px;border-radius:3px;border:1px solid #ffa65733;flex-shrink:0}
+    .g-det{display:none;padding:0 24px 16px;background:#0d1117;border-top:1px solid #1a1e24}
+    .g-det.open{display:block}
+    .g-header-info{display:flex;gap:16px;flex-wrap:wrap;padding:12px 0 8px;font-size:.72rem;color:#6a6e75;border-bottom:1px solid #1a1e24;margin-bottom:10px}
+    .g-header-info span{display:flex;align-items:center;gap:4px}
+    .decoded-prompt{background:#060a10;border:1px solid #1a1e24;border-radius:6px;padding:12px;font-size:.78rem;color:#c5c8c6;line-height:1.55;max-height:300px;overflow-y:auto;margin-bottom:12px;white-space:pre-wrap;word-break:break-word}
+    .decoded-prompt::-webkit-scrollbar{width:4px}
+    .decoded-prompt::-webkit-scrollbar-thumb{background:#2a2e35;border-radius:2px}
+    .tool-section{border:1px solid #1a1e24;border-radius:6px;margin-bottom:10px;background:#0d1117}
+    .tool-section-hdr{padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:.75rem;color:#ffa657;font-weight:600;border-bottom:1px solid #1a1e24}
+    .tool-section-hdr:hover{background:#151921}
+    .tool-section-hdr .arrow{transition:transform .2s;color:#6272a4}
+    .tool-section-hdr.open .arrow{transform:rotate(90deg)}
+    .tool-section-body{display:none;padding:8px 12px}
+    .tool-section-body.open{display:block}
+    .tool-card{margin:4px 0;padding:8px 10px;background:#060a10;border-radius:4px;border:1px solid #2a2e35}
+    .tool-card .tc-name{color:#ffa657;font-size:.75rem;font-weight:600;margin-bottom:2px}
+    .tool-card .tc-args{font-size:.65rem;color:#8b949e;margin-top:2px;max-height:200px;overflow-y:auto}
+    .req-row{border-bottom:1px solid #1a1e24;padding:6px 0}
+    .req-row:last-child{border-bottom:none}
+    .req-hdr{display:flex;align-items:center;gap:10px;font-size:.73rem;color:#8b949e;cursor:pointer;padding:4px 0}
+    .req-hdr:hover{color:#c5c8c6}
+    .req-hdr .r-num{color:#4a4e55;flex-shrink:0}
+    .req-hdr .r-ts{color:#6a6e75;flex-shrink:0}
+    .req-hdr .r-st{flex-shrink:0}
+    .req-hdr .r-st.ok{color:#50fa7b}
+    .req-hdr .r-st.err{color:#ff5555}
+    .req-hdr .r-st.stream{color:#f1fa8c}
+    .req-hdr .r-st.pend{color:#ff5555}
+    .req-hdr .r-preview{color:#6272a4;font-size:.7rem;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-left:auto}
+    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;margin-left:12px}
+    .req-body{display:none;margin-top:8px;background:#060a10;border:1px solid #1a1e24;border-radius:6px;padding:12px;overflow-x:auto;font-size:.72rem;line-height:1.5;max-height:60vh;overflow-y:auto}
+    .req-body.visible{display:block}
+    .lbl{color:#bd93f9;font-weight:600;margin-bottom:4px;display:inline-block}
+    .detail-section{margin-bottom:10px;padding:8px;background:#0d1117;border-radius:4px;border:1px solid #21262d}
+    .detail-section pre{margin:4px 0 0;font-size:.68rem;max-height:300px;overflow-y:auto}
+    .req-body-raw{white-space:pre-wrap !important;word-break:break-word !important;line-height:1.5 !important;font-size:.72rem !important;max-height:none !important;color:#c5c8c6}
+    .req-collapsed{display:none}
+    .req-collapsed.show{display:block}
+    .req-toggle{cursor:pointer;user-select:none}
+    .req-toggle:hover{color:#7ec8e3}
+    .j-key{color:#8be9fd}.j-str{color:#98c379}.j-num{color:#d4be98}.j-bool{color:#ff6ac1}.j-null{color:#6272a4}
+    .empty{text-align:center;color:#4a4e55;margin-top:120px;font-size:1rem}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><span class="dot"></span> Ollama Flow Visualizer</h1>
+    <div class="ctrls">
+      <span id="summary"></span>
+      <button id="clrBtn">🗑 Clear</button>
+    </div>
+  </div>
+  <div id="summaryBar"></div>
+  <div id="groups"></div>
+
+<script>
+let logs=[];
+let groupsTicker = null; // jedan interval za sve grupe (ticka svake 2s)
+
+// Sačuvaj proširena stanja: expandedGroups = {key: true}
+let expandedGroups = {};
+function saveExpandedState() {
+  const els = document.querySelectorAll('.group');
+  if (!els.length) return;
+  els.forEach(el => {
+    const key = el.dataset.groupKey;
+    if (key) {
+      const isExpanded = el.querySelector('.g-hdr.expanded') !== null;
+      if (isExpanded) expandedGroups[key] = true;
+      else delete expandedGroups[key];
+    }
+  });
+}
+function restoreExpandedState() {
+  const els = document.querySelectorAll('.group');
+  if (!els.length) return;
+  els.forEach(el => {
+    const key = el.dataset.groupKey;
+    if (key && expandedGroups[key]) {
+      const hdr = el.querySelector('.g-hdr');
+      const det = el.querySelector('.g-det');
+      if (hdr && det) {
+        hdr.classList.add('expanded');
+        det.classList.add('open');
+      }
+    }
+  });
+}
+
+function normalizePrompt(p){if(!p)return null;return p.trim().replace(/\s+/g,' ')}
+function fmtTs(iso){if(!iso)return '--';const d=new Date(iso);return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}
+function fmtTsFull(iso){if(!iso)return '--';const d=new Date(iso);return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`}
+function fmtDur(ms){if(!ms||ms<0)return '0m 0s';const s=Math.floor(ms/1000);const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;if(h>0)return `${h}h ${m}m ${sec}s`;return `${m}m ${sec}s`}
+function fmtSz(b){if(!b||b<0)return '0B';if(b<1024)return b+'B';if(b<1048576)return(b/1024).toFixed(1)+'KB';return(b/1048576).toFixed(2)+'MB'}
+// Newline fixer
+function fixNewlines(s){if(!s)return '';return s.split('\\n').join('\n');}
+function escHtml(s){if(!s)return '';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+function prettyJSON(v){try{return JSON.stringify(typeof v==='string'?JSON.parse(v):v,null,2)}catch(e){return typeof v==='string'?v:JSON.stringify(v)}}
+function highlightJSON(s){if(!s)return '';let a=escHtml(s);a=a.replace(/("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"]*)*")\s*:/g,m=>`<span class="j-key">${m}</span>`);a=a.replace(/:\s*"([^"]*)"/g,(m,v)=>`: <span class="j-str">"${v}"</span>`);a=a.replace(/:\s*(true|false)/g,(m,v)=>`: <span class="j-bool">${v}</span>`);a=a.replace(/:\s*(-?\d[\d.]*)/g,(m,v)=>`: <span class="j-num">${v}</span>`);a=a.replace(/:\s*null/g,m=>`: <span class="j-null">null</span>`);return a;}
+
+// ===== Pametno grupisanje =====
+// Grupišemo po kombinaciji: (userPrompt, broj tool_calls u requestu)
+// Svaki "zaokruženi" tok je jedno grupisanje
+
+function makeGroupKey(log) {
+  // Group exclusively by user prompt — same prompt = same group
+  const prompt = normalizePrompt(log.userPrompt) || 'NO_PROMPT';
+  return prompt;
+}
+
+function generateToolHtml(rtc, tos, groupToolOutputsMap) {
+  if (!rtc || !rtc.length) return '';
+  const allIds = [];
+  const tcById = {};
+  const toById = {};
+  rtc.forEach(tc => { if (tc.id) { tcById[tc.id] = tc; if (!allIds.includes(tc.id)) allIds.push(tc.id); } });
+  tos.forEach(to => { if (to.toolCallId) { toById[to.toolCallId] = to; } });
+  // Ako imamo grupni map, dodaj i njegove ID-eve
+  if (groupToolOutputsMap) {
+    groupToolOutputsMap.forEach((v, k) => { if (!toById[k]) toById[k] = v; });
+  }
+  // Popuni allIds iz tcById (tool call ID-evi) + dodaj one koji su samo u outputima
+  rtc.forEach(tc => { if (tc.id && !allIds.includes(tc.id)) allIds.push(tc.id); });
+  tos.forEach(to => { if (to.toolCallId && !allIds.includes(to.toolCallId)) allIds.push(to.toolCallId); });
+  if (groupToolOutputsMap) {
+    groupToolOutputsMap.forEach((v, k) => { if (!allIds.includes(k)) allIds.push(k); });
+  }
+  // Ako nema ID-eva, fallback na index-based
+  if (allIds.length === 0) {
+    for (let ti = 0; ti < Math.max(rtc.length, tos.length); ti++) allIds.push(ti);
+  }
+  let html = '';
+  allIds.forEach(tcId => {
+    const tcReq = (typeof tcId === 'string' ? tcById[tcId] : rtc[tcId]) || null;
+    // Prvo probaj per-item toolOutputs, zatim grupni map
+    let tcOut = (typeof tcId === 'string' ? toById[tcId] : tos[tcId]) || null;
+    if (!tcOut && groupToolOutputsMap && typeof tcId === 'string') {
+      tcOut = groupToolOutputsMap.get(tcId) || null;
+    }
+    if (!tcReq && !tcOut) return; // ništa — preskoči
+    const nm = tcReq ? (tcReq.function?.name || tcReq.name || 'unknown') : (tcOut ? (tcOut.name || 'output') : 'unknown');
+    // Pokaži rawArgs (sirovi tekst), zatim parsed arguments (ako se razlikuju)
+    let args = '';
+    let rawArgs = '';
+    if (tcReq) {
+      rawArgs = tcReq.function?.rawArgs || tcReq.function?.arguments || '';
+      if (typeof rawArgs === 'object') { rawArgs = JSON.stringify(rawArgs, null, 2); }
+      let a = tcReq.function?.arguments || tcReq.arguments || '{}';
+      if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
+      else if (typeof a === 'string') { try { args = JSON.stringify(JSON.parse(a), null, 2); } catch(e) { args = a; } }
+    }
+    let outVal = '(waiting for output...)';
+    if (tcOut) {
+      let v = tcOut.content || tcOut.output || tcOut.result || tcOut.response || tcOut.value || JSON.stringify(tcOut);
+      if (typeof v === 'object') v = JSON.stringify(v, null, 2);
+      else if (typeof v === 'string') v = v.replace(/\\\\n/g, '\n');
+      outVal = v;
+    }
+    html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
+    html += '<div class="tp-name" style="color:#ffa657;font-size:.82rem;font-weight:600;margin-bottom:4px">\u26a1 ' + escHtml(nm) + '</div>';
+    if (rawArgs && rawArgs !== args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCDD Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(rawArgs) + '</pre></div>';
+    if (args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Parsed:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args) + '</pre></div>';
+    html += '<div class="tp-out" style="border-top:1px solid #2a2e35;padding-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Output:</div><pre style="margin:4px 0 0;font-size:.72rem;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(outVal) + '</pre></div>';
+    html += '</div>';
+  });
+  return html;
+}
+
+
+function buildGroups() {
+  if (logs.length === 0) return {};
+  const map = new Map();
+  
+  logs.forEach(log => {
+    const key = makeGroupKey(log);
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        key,
+        prompt: normalizePrompt(log.userPrompt) || '(no prompt)',
+        items: [],
+        firstTs: log.timestamp,
+        lastTs: log.timestamp,
+        hasError: false,
+        hasActive: false,
+        decodedText: null,
+        toolCallsExec: [],
+        systemContexts: new Set()
+      };
+      map.set(key, g);
+    }
+    g.items.push(log);
+    if (log.status === 'error' || log.error) g.hasError = true;
+    if (log.status === 'streaming' || log.status === 'pending') g.hasActive = true;
+    if (log.decodedText && (!g.decodedText || log.decodedText.length > g.decodedText.length)) {
+      g.decodedText = log.decodedText;
+    }
+    if (log.toolCallsExec && log.toolCallsExec.length) {
+      // Append, deduplicate by function name+arguments
+      log.toolCallsExec.forEach(tc => {
+        const tcKey = tc.function?.name + '|' + JSON.stringify(tc.function?.arguments);
+        if (!g.toolCallsExec.find(ex => (ex.function?.name + '|' + JSON.stringify(ex.function?.arguments)) === tcKey)) {
+          g.toolCallsExec.push({...tc, _groupIndex: g.toolCallsExec.length});
+        }
+      });
+    }
+    // Sakupi sve toolOutputs u mapu po toolCallId (ili po indeksu)
+    if (log.toolOutputs && log.toolOutputs.length) {
+      if (!g.toolOutputsMap) g.toolOutputsMap = new Map();
+      log.toolOutputs.forEach((out, oi) => {
+        const tid = out.toolCallId || `idx_${oi}`;
+        // Ako vise outputa ima isti toolCallId, uzmi poslednji
+        g.toolOutputsMap.set(tid, out);
+      });
+    }
+    if (log.systemContext) g.systemContexts.add(log.systemContext.slice(0, 200));
+    if (new Date(log.timestamp) < new Date(g.firstTs)) g.firstTs = log.timestamp;
+    if (new Date(log.timestamp) > new Date(g.lastTs)) g.lastTs = log.timestamp;
+  });
+  
+  // Sortiraj: najnoviji zahtev na vrhu (reverse chronological)
+  map.forEach(g => g.items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+  console.log('[BUILD] grupe:', [...map.entries()].map(([k,g]) => ({key:k, lastTs:g.lastTs, firstTs:g.firstTs, cnt:g.items.length})));
+  return Object.fromEntries(map);
+}
+
+function groupStatus(g) {
+  if (g.hasError) return 'error';
+  if (g.hasActive) return 'active';
+  return 'complete';
+}
+
+function updateSummary(groups) {
+  const grp = Object.keys(groups).length;
+  const total = Object.values(groups).reduce((s, g) => s + g.items.length, 0);
+  const dur = Object.values(groups).reduce((s, g) => s + g.items.reduce((a, i) => a + (i.durationMs || 0), 0), 0);
+  const data = Object.values(groups).reduce((s, g) => s + g.items.reduce((a, i) => a + (i.requestSize || 0) + (i.responseSize || 0), 0), 0);
+  document.getElementById('summary').textContent = `${grp} groups │ ${total} requests │ ${fmtDur(dur)} │ ${fmtSz(data)}`;
+  let ac = 0, co = 0, er = 0;
+  Object.values(groups).forEach(g => { const st = groupStatus(g); if (st === 'active') ac++; else if (st === 'error') er++; else co++; });
+  document.getElementById('summaryBar').innerHTML =
+    `<div class="seg"><span style="color:#50fa7b">●</span> Completed: <b>${co}</b></div>` +
+    `<div class="seg"><span style="color:#f1fa8c">●</span> Active: <b>${ac}</b></div>` +
+    `<div class="seg"><span style="color:#ff5555">●</span> Error: <b>${er}</b></div>` +
+    `<div class="seg">📊 <b>${grp}</b> groups / <b>${total}</b> requests</div>`;
+}
+
+// Start ticker for updating duration of active requests and groups
+function startGroupsTicker() {
+  if (groupsTicker) return;
+  groupsTicker = setInterval(() => {
+    const now = Date.now();
+    document.querySelectorAll('.group').forEach(el => {
+      const key = el.dataset.groupKey;
+      if (!key) return;
+      // Azuriraj r-dur za sve pending/streaming req-row-eve
+      el.querySelectorAll('.req-row').forEach(row => {
+        const st = row.querySelector('.r-st')?.textContent;
+        if (st === '🌊' || st === '⏳') {
+          const id = row.dataset.reqId;
+          const log = logs.find(l => l.id === id);
+          if (log) {
+            // Ako imamo startTime izracunaj duration od pocetka
+            let dur = log.durationMs || 0;
+            if (log.timestamp) {
+              const elapsed = now - new Date(log.timestamp).getTime();
+              if (elapsed > dur) dur = elapsed;
+            }
+            const durEl = row.querySelector('.r-dur');
+            if (durEl) durEl.textContent = fmtDur(dur);
+            // Sacuvaj u log za grupni izracun
+            log._liveDur = dur;
+          }
+        }
+      });
+      // Azuriraj header grupe
+      const durEl = el.querySelector('.g-hdr .dur');
+      if (durEl) {
+        const grpItems = logs.filter(l => makeGroupKey(l) === key);
+        const totalMs = grpItems.reduce((s, i) => s + (i._liveDur || i.durationMs || 0), 0);
+        durEl.textContent = `⏱ ${fmtDur(totalMs)}`;
+      }
+    });
+  }, 2000);
+}
+
+function buildGroupHtml(g) {
+  const st = groupStatus(g);
+  const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
+  const cnt = g.items.length;
+  const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
+  const stLbl = st === 'error' ? '⚠ Interrupted' : (st === 'active' ? '⏳ Active' : '✓ Completed');
+  const display = g.prompt.length > 600 ? g.prompt.slice(0, 600) + '…' : g.prompt;
+  // Collect all tools from items that have them (each item provides its own requestToolCalls)
+  const allToolCalls = [];
+  const seenTool = new Set();
+  g.items.forEach(item => {
+    (item.requestToolCalls || []).forEach(tc => {
+      const name = tc.function?.name || tc.name;
+      if (name && !seenTool.has(name)) { seenTool.add(name); allToolCalls.push(tc); }
+    });
+  });
+  const hasTools = allToolCalls.length > 0;
+
+  // Decoded section — uzmi najduži decodedText iz svih item-a
+  let decodedHtml = '';
+  let bestDecoded = '';
+  g.items.forEach(item => {
+    if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+  });
+  if (bestDecoded) {
+    const maxDecoded = 5000;
+    const text = bestDecoded.length > maxDecoded ? bestDecoded.slice(0, maxDecoded) + '\n[TRUNCATED]' : bestDecoded;
+    decodedHtml = `<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">${escHtml(text)}</div></div>`;
+  }
+
+  // Tool calls + outputs section (at group level — shared across all reqs)
+  // Tools are shown in req-body, not at group level
+  // Napravi grupni map tool outputa za unakrsno matchovanje
+  const groupOutputMap = g.toolOutputsMap || new Map();
+
+  // Req rows
+  let rowsHtml = '';
+  g.items.forEach((item, idx) => {
+    const rIcon = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
+    const rCls = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
+
+    const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : '';
+    
+    // Tool calls + outputs linked by order (requestToolCalls[i] → toolOutputs[i])
+    let toolPairsHtml = generateToolHtml(item.requestToolCalls || [], (item.toolOutputs || []), groupOutputMap);
+    let rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
+    let rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
+    rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
+      `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}</span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
+      `<div class="req-body">${rb}${rq}${toolPairsHtml}</div></div>`;
+  });
+
+  return `<div class="g-hdr" onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('open')"><span class="arrow">▶</span><span class="ts">📅 ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span><span class="status ${stCls}">${stLbl}</span><span class="dur">⏱ ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">🛠 ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+}
+
+function render(groups) {
+  const container = document.getElementById('groups');
+  const sorted = Object.values(groups).sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs));
+
+  // Sacuvaj expand state iz DOM-a pre bilo kakvih promena
+  const oldExpanded = {};
+  container.querySelectorAll('.group').forEach(el => {
+    const key = el.dataset.groupKey;
+    if (key && el.querySelector('.g-hdr.expanded')) oldExpanded[key] = true;
+  });
+
+  // Hash-based diffing: poredi samo status + duration, ne data koja se menjaju u streamu
+  const newHash = sorted.map(g => g.key + ':' + g.items.map(i => i.status + '|' + (i.durationMs||0)).join(',')).join(';');
+  if (container.dataset.lastHash === newHash) return;
+  container.dataset.lastHash = newHash;
+
+  // Ukloni placeholder ako postoji
+  const placeholderEl = container.querySelector('.empty');
+  if (placeholderEl) placeholderEl.remove();
+
+  // Azuriraj postojece grupe i dodaj nove u sortiranom redosledu
+  const existingSet = new Set(sorted.map(g => g.key));
+  let prevEl = null;
+  sorted.forEach((g) => {
+    let el = container.querySelector(`.group[data-group-key="${CSS.escape(g.key)}"]`);
+    if (!el) {
+      // New group — create
+      el = document.createElement('div');
+      el.className = 'group';
+      el.dataset.groupKey = g.key;
+      el.innerHTML = buildGroupHtml(g);
+      // Ubaci na pravo mesto (posle prevEl)
+      if (prevEl && prevEl.nextSibling) {
+        container.insertBefore(el, prevEl.nextSibling);
+      } else if (!prevEl && container.firstChild) {
+        container.insertBefore(el, container.firstChild);
+      } else {
+        container.appendChild(el);
+      }
+    } else {
+      // Existing group — update content
+      // Prvo proveri da li je na pravom mestu
+      if (prevEl) {
+        const expectedNext = prevEl.nextSibling;
+        if (expectedNext !== el) {
+          container.insertBefore(el, expectedNext && expectedNext.classList.contains('group') ? expectedNext : (prevEl.nextSibling || null));
+        }
+      } else if (container.firstChild && container.firstChild !== el) {
+        container.insertBefore(el, container.firstChild);
+      }
+      
+      // Azuriraj header info
+      const hdr = el.querySelector('.g-hdr');
+      if (hdr) {
+        const st = groupStatus(g);
+        const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
+        const stLbl = st === 'error' ? '⚠ Interrupted' : (st === 'active' ? '⏳ Active' : '✓ Completed');
+        const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
+        hdr.querySelector('.status').className = `status ${stCls}`;
+        hdr.querySelector('.status').textContent = stLbl;
+        hdr.querySelector('.dur').textContent = `⏱ ${dur}`;
+        hdr.querySelector('.count').textContent = `${g.items.length}x`;
+      }
+      // Azuriraj decodedText — uzmi najduži iz svih item-a
+      const det = el.querySelector('.g-det');
+      if (det) {
+        let bestDecoded = '';
+        g.items.forEach(item => {
+          if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+        });
+        const oldDecodedLabel = det.querySelector('.decoded-prompt');
+        const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
+        if (bestDecoded.length > oldDecodedText.length) {
+          const maxD = 5000;
+          const txt = bestDecoded.length > maxD ? bestDecoded.slice(0, maxD) + '\n[TRUNCATED]' : bestDecoded;
+          const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
+          if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
+          else det.insertAdjacentHTML('afterbegin', newSec);
+        }
+        // Upsert req-row-ova
+        const knownIds = new Set();
+        g.items.forEach((item, idx) => {
+          knownIds.add(item.id);
+          const reqEl = det.querySelector(`.req-row[data-req-id="${CSS.escape(item.id)}"]`);
+          if (reqEl) {
+            // Uvek rebuild-uj ceo req-row kada stigne update (pokriva status, decodedText, responseBody, toolCalls)
+            const oldBody = reqEl.querySelector('.req-body');
+            const wasVisible = oldBody && oldBody.classList.contains('visible');
+            const idx = g.items.length;
+            const ri = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
+            const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
+            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : '';
+            // Tool calls + outputs linked by order
+            let toolPairsHtml = generateToolHtml(item.requestToolCalls || [], (item.toolOutputs || []), g.toolOutputsMap);
+            const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
+            const rq = item.requestBody ? `<div class="detail-section"><span class="lbl">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
+            // Replace entire innerHTML (header + body)
+            reqEl.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rb}${rq}${toolPairsHtml}</div>`;
+            if (wasVisible) {
+              const nb = reqEl.querySelector('.req-body');
+              if (nb) nb.classList.add('visible');
+            }
+          } else {
+            // New req — add to top
+            const idx = g.items.length;
+            const ri = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
+            const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
+            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : '';
+            // Tool calls + outputs linked by order
+            let toolPairsHtml = generateToolHtml(item.requestToolCalls || [], (item.toolOutputs || []), g.toolOutputsMap);
+            const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
+            const rq = item.requestBody ? `<div class="detail-section"><span class="lbl">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
+            const nr = document.createElement('div');
+            nr.className = 'req-row';
+            nr.dataset.reqId = item.id;
+            nr.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rb}${rq}${toolPairsHtml}</div>`;
+            const firstReq = det.querySelector('.req-row');
+            if (firstReq) det.insertBefore(nr, firstReq);
+            else det.appendChild(nr);
+          }
+        });
+        // Azuriraj grupni header (status, dur, count, tools)
+        {
+          const hdr = el.querySelector('.g-hdr');
+          if (hdr) {
+            const st = groupStatus(g);
+            const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
+            const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
+            const stLbl = st === 'error' ? '⚠ Interrupted' : (st === 'active' ? '⏳ Active' : '✓ Completed');
+            hdr.querySelector('.status').textContent = stLbl;
+            hdr.querySelector('.status').className = 'status ' + stCls;
+            hdr.querySelector('.dur').textContent = '\u23f1 ' + dur;
+            hdr.querySelector('.count').textContent = g.items.length + 'x';
+            // Update tools badge
+            const allToolCalls = [];
+            const seenTool = new Set();
+            g.items.forEach(item => {
+              (item.requestToolCalls || []).forEach(tc => {
+                const name = tc.function?.name || tc.name;
+                if (name && !seenTool.has(name)) { seenTool.add(name); allToolCalls.push(tc); }
+              });
+            });
+            const hasTools = allToolCalls.length > 0;
+            let badge = hdr.querySelector('.tools-badge');
+            if (hasTools) {
+              if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'tools-badge';
+                hdr.appendChild(badge);
+              }
+              badge.textContent = '\uD83D\u6EE0 ' + allToolCalls.length;
+            } else if (badge) {
+              badge.remove();
+            }
+          }
+        }
+        // Update decoded section
+        {
+          let bestDecoded = '';
+          g.items.forEach(item => {
+            if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+          });
+          const det = el.querySelector('.g-det');
+          if (det) {
+            const oldDecodedLabel = det.querySelector('.decoded-prompt');
+            const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
+            if (bestDecoded.length > oldDecodedText.length) {
+              const maxD = 5000;
+              const txt = bestDecoded.length > maxD ? bestDecoded.slice(0, maxD) + '\n[TRUNCATED]' : bestDecoded;
+              const newSec = '<div class="detail-section"><span class="lbl">\uD83D\uDCAC De\u0161ifrovani odgovor:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
+              if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
+              else det.insertAdjacentHTML('afterbegin', newSec);
+            }
+          }
+        }
+        // Ukloni req-row-eve koji vise ne postoje
+        det.querySelectorAll('.req-row').forEach(row => {
+          if (!knownIds.has(row.dataset.reqId)) row.remove();
+        });
+      }
+    }
+    prevEl = el;
+  });
+  
+  // Ukloni grupe koje vise ne postoje
+  container.querySelectorAll('.group').forEach(el => {
+    if (!existingSet.has(el.dataset.groupKey)) el.remove();
+  });
+  
+  // If no groups, show placeholder
+  if (!sorted.length) {
+    container.innerHTML = '<div class="empty">No active requests...</div>';
+  }
+  
+  // Restore expand state from DOM
+  Object.keys(oldExpanded).forEach(key => {
+    const el = container.querySelector(`.group[data-group-key="${CSS.escape(key)}"]`);
+    if (el) {
+      const hdr = el.querySelector('.g-hdr');
+      const det = el.querySelector('.g-det');
+      if (hdr && det) {
+        hdr.classList.add('expanded');
+        det.classList.add('open');
+      }
+    }
+  });
+}
+
+function refresh() {
+  fetch('/api/logs').then(r => r.json()).then(data => {
+    logs = data.slice(0, 200);
+    const g = buildGroups();
+    updateSummary(g);
+    render(g);
+  });
+}
+
+const socket = io();
+let socketLastUpdate = 0;
+
+// Polling fallback — ako Socket.IO ne radi, polliraj svake 2s
+let lastPollHash = '';
+function pollLogs() {
+  fetch('/api/logs').then(r => r.json()).then(data => {
+    // Poredi samo ID + status — ignorisi decodedText/promene duzine
+    const hash = JSON.stringify(data.map(l => l.id + ':' + l.status + ':' + (l.durationMs||0)));
+    if (hash !== lastPollHash) {
+      lastPollHash = hash;
+      if (Date.now() - socketLastUpdate > 1000) {
+        logs = data;
+        const g = buildGroups();
+        updateSummary(g);
+        render(g);
+      }
+    }
+  }).catch(() => {});
+}
+setInterval(pollLogs, 5000); // polling samo kad Socket.IO padne
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('clrBtn').onclick = () => {
+  fetch('/api/logs', { method: 'DELETE' }).then(r => r.json()).then(() => {
+    logs = []; expandedGroups = {}; refresh();
+  }).catch(() => { logs = []; expandedGroups = {}; refresh(); });
+};
+  startGroupsTicker();
+  
+  socket.on('init', data => { logs = data; refresh(); });
+  socket.on('log-update', payload => {
+    const i = logs.findIndex(l => l.id === payload.id);
+    if (i >= 0) logs[i] = payload;
+    else { logs.unshift(payload); if (logs.length > 200) logs.pop(); }
+    socketLastUpdate = Date.now();
+    const g = buildGroups();
+    updateSummary(g);
+    render(g);
+  });
+  socket.on('live-duration', data => {
+    const i = logs.findIndex(l => l.id === data.id);
+    if (i >= 0 && logs[i].durationMs !== data.durationMs) {
+      logs[i].durationMs = data.durationMs;
+      document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(data.id)}"]`).forEach(el => {
+        const durEl = el.querySelector('.r-dur');
+        if (durEl) durEl.textContent = fmtDur(data.durationMs);
+      });
+      const g = buildGroups();
+      updateSummary(g);
+      Object.values(g).forEach(grp => {
+        const el = document.querySelector(`.group[data-group-key="${CSS.escape(grp.key)}"]`);
+        if (!el) return;
+        const hdr = el.querySelector('.g-hdr');
+        if (!hdr) return;
+        const st = groupStatus(grp);
+        hdr.querySelector('.status').textContent = st === 'active' ? '⏳ Active' : (st === 'error' ? '⚠ Interrupted' : '✓ Completed');
+        hdr.querySelector('.status').className = `status ${st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete')}`;
+        hdr.querySelector('.dur').textContent = `⏱ ${fmtDur(grp.items.reduce((s, i) => s + (i.durationMs || 0), 0))}`;
+      });
+    }
+  });
+  refresh();
+});
+</script>
+</body>
+</html>

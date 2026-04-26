@@ -1,0 +1,21 @@
+{
+  "proxy": {
+    "host": "0.0.0.0",
+    "port": 11435
+  },
+  "ollama": {
+    "host": "172.16.100.5",
+    "port": 11434
+  },
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "limits": {
+    "maxLogs": 500,
+    "requestBodyMaxChars": 5000,
+    "toolOutputMaxChars": 2000,
+    "decodedTextMaxChars": 5000,
+    "streamTimeoutMs": 600000
+  }
+}

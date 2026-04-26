@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+  <meta charset="UTF-8">
+  <title>Ollama Console</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link rel="icon" href="data:,">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{
+      font-family:'JetBrains Mono','Fira Code','Courier New',monospace;
+      background:#0a0e14;color:#c5c8c6;
+      height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    }
+    .bar{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:6px 16px;background:#151921;border-bottom:1px solid #2a2e35;flex-shrink:0;
+    }
+    .bar h1{font-size:.8rem;color:#7ec8e3;display:flex;align-items:center;gap:8px}
+    .bar h1 .dot{width:8px;height:8px;border-radius:50%;background:#50fa7b;display:inline-block}
+    .bar-ctrls{display:flex;gap:6px;align-items:center}
+    .bar-ctrls input{
+      padding:3px 10px;border:1px solid #2a2e35;border-radius:4px;
+      background:#0d1117;color:#c5c8c6;font-size:.7rem;font-family:inherit;width:200px;
+    }
+    .bar-ctrls button{
+      padding:3px 10px;border:1px solid #2a2e35;border-radius:4px;
+      background:#1a1e24;color:#8b949e;cursor:pointer;font-size:.65rem;font-family:inherit;
+    }
+    .bar-ctrls .cnt{font-size:.65rem;color:#6a6e75;padding:0 6px}
+    .con{flex:1;overflow-y:auto;padding:1px 12px;scrollbar-width:thin;scrollbar-color:#2a2e35 #0a0e14}
+    .con::-webkit-scrollbar{width:4px}
+    .con::-webkit-scrollbar-track{background:#0a0e14}
+    .con::-webkit-scrollbar-thumb{background:#2a2e35;border-radius:2px}
+    .row{display:flex;gap:10px;padding:3px 6px;font-size:.75rem;border-radius:3px;line-height:1.5;cursor:default}
+    .row:hover{background:#151921}
+    .row.err{background:#ff555512}
+    .r-ts{color:#6a6e75;flex-shrink:0;font-size:.68rem;padding-top:1px}
+    .r-st{flex-shrink:0;font-size:.72rem;padding-top:1px}
+    .r-st.ok{color:#50fa7b} .r-st.pnd{color:#f1fa8c}
+    .r-st.err{color:#ff5555} .r-st.str{color:#8be9fd}
+    .r-prompt{color:#8b949e;flex:1;word-break:break-word}
+    .r-dur{flex-shrink:0;color:#4a4e55;font-size:.65rem;padding-top:2px;text-align:right}
+    .r-dur.slow{color:#ff5555} .r-dur.med{color:#f1fa8c}
+    .empty{text-align:center;color:#4a4e55;margin-top:120px;font-size:.8rem}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <h1><span class="dot"></span> Console</h1>
+    <div class="bar-ctrls">
+      <span class="cnt" id="cnt">0</span>
+      <input id="fIn"/>
+      <button id="pBtn">⏸ Pause</button>
+      <button id="cBtn">Clear</button>
+    </div>
+  </div>
+  <div class="con" id="con"></div>
+  <script>
+    const $c=document.getElementById('con');
+    const $f=document.getElementById('fIn');
+    const $p=document.getElementById('pBtn');
+    const $b=document.getElementById('cBtn');
+    const $n=document.getElementById('cnt');
+    let all=[], autoScroll=true, filt='';
+    const MAX=500;
+
+    function ts(iso){
+      if(!iso)return'--:--:--';
+      const d=new Date(iso);
+      return [d.getHours(),d.getMinutes(),d.getSeconds()]
+        .map(n=>String(n).padStart(2,'0')).join(':');
+    }
+    function esc(s){
+      if(!s)return'';
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function promptFrom(body){
+      if(!body)return'';
+      try{
+        const b=JSON.parse(body);
+        if(b.messages?.length){
+          const u=[...b.messages].reverse().find(m=>m.role==='user');
+          if(u){
+            let c=u.content;
+            if(typeof c==='string')return c;
+            if(Array.isArray(c)){
+              const t=c.find(p=>typeof p==='object'&&p.type==='text');
+              if(t)return t.text||'';
+              return c.filter(x=>typeof x==='string').join(' ');
+            }
+          }
+        }
+        if(b.prompt)return String(b.prompt);
+      }catch(e){}
+      return'';
+    }
+    function sp(p,len){
+      p=p.replace(/\n/g,' ').trim().replace(/\s+/g,' ');
+      p=p.replace(/```[\s\S]*?```/g,'[code]');
+      return p.length>len?p.slice(0,len)+'…':p;
+    }
+    function dur(ms){
+      if(!ms)return'';const s=ms/1000;
+      return s>=60?Math.floor(s/60)+'m'+(s%60|0)+'s':s.toFixed(1)+'s';
+    }
+
+    function render(){
+      const show=filt?all.filter(l=>{
+        const p=promptFrom(l.requestBody||'');
+        return JSON.stringify(l).toLowerCase().includes(filt)||p.toLowerCase().includes(filt);
+      }):all;
+      $n.textContent=show.length;
+      if(!show.length){$c.innerHTML='<div class="empty">Čekam zahteve...</div>';return}
+      $c.innerHTML=show.map(l=>{
+        const p=promptFrom(l.requestBody||'')||'(empty)';
+        let sc='',st='';
+        if(l.status==='error'){sc='err';st='❌'}
+        else if(l.status==='pending'){sc='pnd';st='⏳'}
+        else if(l.streaming){sc='str';st='📡'}
+        else{sc='ok';st='✅'}
+        const dc=l.durationMs>30000?'slow':l.durationMs>5000?'med':'';
+        return `<div class="row${l.status==='err'?' err':''}">
+          <span class="r-ts">${ts(l.timestamp)}</span>
+          <span class="r-st ${sc}">${st}</span>
+          <span class="r-prompt">${esc(sp(p,200))}</span>
+          <span class="r-dur ${dc}">${dur(l.durationMs)}</span>
+        </div>`;
+      }).join('');
+      if(autoScroll)$c.scrollTop=0;
+    }
+
+    $b.onclick=()=>{all=[];$f.value='';filt='';render()};
+    $p.onclick=()=>{autoScroll=!autoScroll;$p.textContent=autoScroll?'⏸ Pause':'▶ Resume'};
+    $f.oninput=()=>{filt=$f.value.toLowerCase().trim();render()};
+    document.onkeydown=e=>{
+      if(e.key==='/'||e.ctrlKey&&e.key==='f'){e.preventDefault();$f.focus()}
+      if(e.key==='Escape'){$f.value='';filt='';$f.blur();render()}
+    };
+
+    const io=io();
+    io.on('init',d=>{all=d.slice(0,MAX);render()});
+    io.on('log-update',e=>{
+      const i=all.findIndex(l=>l.id===e.id);
+      if(i>=0)all[i]=e;else{all.unshift(e);if(all.length>MAX)all.pop()}
+      render();
+    });
+  </script>
+</body>
+</html>
