@@ -170,6 +170,8 @@ Now OpenClaw sends all requests through the proxy, and they appear on the dashbo
 
 ## Dashboard
 
+![Ollama Flow Visualizer dashboard](docs/screenshots/dashboard.png)
+
 Open `http://<proxy-host>:8080` in any browser.
 
 - **Groups** — requests are grouped by user prompt (click to expand)
