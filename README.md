@@ -122,16 +122,51 @@ exec $NODE server.js
 
 ## Configuring OpenClaw to use the proxy
 
-Set OpenClaw's Ollama endpoint to the proxy address. In `openclaw.yaml` or gateway config:
+Define the proxy as a custom OpenAI-compatible provider in `openclaw.json`:
 
-```yaml
-providers:
-  ollama:
-    host: 127.0.0.1   # or wherever the proxy is running
-    port: 11435        # proxy port, not direct Ollama port (11434)
+```json
+{
+  "providers": {
+    "ollama2": {
+      "baseUrl": "http://localhost:11435/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama-local",
+      "models": [
+        {
+          "id": "qwen3.6:27b-q4_K_M",
+          "name": "Qwen3.6 27B Q4_K_M (local)",
+          "api": "openai-completions",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        }
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "ollama2/qwen3.6-27b-local"
+      }
+    }
+  }
+}
 ```
 
-Now OpenClaw talks to the proxy instead of Ollama directly. All requests are logged on the dashboard.
+The key parts:
+- `baseUrl` — points to the Flow Visualizer proxy (`:11435`), not directly to Ollama (`:11434`)
+- `api` — `"openai-completions"` (the proxy uses OpenAI-compatible format)
+- `apiKey` — any string is fine, the proxy doesn't validate it
+- The model `id` must match the actual Ollama model name
+
+Now OpenClaw sends all requests through the proxy, and they appear on the dashboard at `http://<proxy-host>:8080`.
 
 ## Dashboard
 
