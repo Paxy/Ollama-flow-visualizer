@@ -11,9 +11,10 @@ Intercepts all requests to Ollama, logs them in real-time, and displays them in 
 - **Transparent proxy** — sits between OpenClaw (or any OpenAI-compatible client) and Ollama. No client-side changes needed.
 - **Live dashboard** — Socket.IO-powered real-time UI at `http://<host>:8080`
 - **Smart grouping** — groups requests by user prompt (same prompt = same group on the dashboard)
-- **Tool call matching** — tool calls (`df`, `cat`, `exec`...) and their outputs are matched by ID even when they arrive in different requests
+- **Tool call matching & output lookup** — tool calls (`df`, `cat`, `exec`...) and their outputs are automatically matched by `toolCallId`, even when the call and its output arrive in separate requests within the same group
 - **Streaming support** — real-time duration updates for streaming responses
-- **Total control** — clear logs, expand request/response bodies, see tool execution traces
+- **Error source identification** — automatically detects whether an error originated from Ollama (timeout, connection refused, 5xx) or the Agent (interrupted, tool failure)
+- **Total control** — clear logs, expand request/response bodies, inspect error details, see tool execution traces
 
 ## Installation
 
