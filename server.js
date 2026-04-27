@@ -253,34 +253,7 @@ const proxyServer = http.createServer((req, res) => {
       }
     }
 
-    // Debug: show body structure
-    if (requestBodyStr) {
-      try {
-        const parsed = JSON.parse(requestBodyStr);
-        console.log(`[BODY KEYS] ${Object.keys(parsed).join(', ')}`);
-        if (parsed.messages && Array.isArray(parsed.messages)) {
-          const roles = parsed.messages.map(m => m.role).join(', ');
-          const contents = parsed.messages.map(m => typeof m.content).join(', ');
-          console.log(`[BODY MSGS] roles: ${roles}, content types: ${contents}`);
-          parsed.messages.forEach((m, i) => {
-            const c = m.content;
-            const type = typeof c;
-            const preview = type === 'string' ? c.slice(0, 80) : (Array.isArray(c) ? `[array len=${c.length}]` : (c ? `object keys=${Object.keys(c).join(',')}` : 'null/undefined'));
-            console.log(`  msg[${i}] role=${m.role} type=${type} preview=${preview}`);
-          });
-          // Last user message - raw
-          const lastUser = [...parsed.messages].reverse().find(m => m.role === 'user');
-          if (lastUser) {
-            console.log(`[LAST USER RAW] ${JSON.stringify(lastUser).slice(0, 500)}`);
-          }
-        } else {
-          console.log(`[BODY PREVIEW] ${requestBodyStr.slice(0, 500)}`);
-        }
-      } catch (e) {
-        console.log(`[BODY PARSE ERROR] ${e.message}`);
-        console.log(`[BODY PREVIEW] ${requestBodyStr.slice(0, 500)}`);
-      }
-    }
+    
 
     // Emit pending log immediately, before sending to Ollama
     logEntry.requestSize = requestBodyBuffer.length;
@@ -456,7 +429,6 @@ const proxyServer = http.createServer((req, res) => {
             // Extract decoded text from non-streaming response (OpenAI / Ollama format)
             let decodedText = '';
             try {
-              console.log(`[DECODE TRY] fullResponse length: ${responseStr.length}, first 100: ${responseStr.slice(0, 100)}`);
               const resp = JSON.parse(responseStr);
               if (resp.message && resp.message.content) {
                 decodedText = resp.message.content;
@@ -478,7 +450,7 @@ const proxyServer = http.createServer((req, res) => {
                 }));
               }
               if (decodedText) logEntry.decodedText = decodedText;
-            } catch (e) { console.log(`[DECODE ERROR] Non-streaming decode fail: ${e.message}`); }
+            } catch (e) { /* JSON parse failed for non-streaming decoded, ignore */ }
             
             logEntry.responseBody = decodedText
               ? decodedText.slice(0, DECODED_MAX)
