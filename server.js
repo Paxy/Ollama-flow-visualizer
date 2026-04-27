@@ -215,6 +215,26 @@ const proxyServer = http.createServer((req, res) => {
             if (typeof text === 'string' && text.length > TOOL_OUT_MAX) text = text.slice(0, TOOL_OUT_MAX) + '...(truncated)';
             return { toolCallId: m.tool_call_id, content: text };
           });
+
+          // Build request summary for clean frontend display
+          const lastMsg = body.messages[body.messages.length - 1];
+          const extractSummaryText = function(content) {
+            if (typeof content === 'string') return content;
+            if (Array.isArray(content)) return content.filter(p => p.text).map(p => p.text).join(' ');
+            if (content && typeof content === 'object' && content.text) return content.text;
+            return '';
+          };
+          logEntry.requestSummary = {
+            model: body.model || 'unknown',
+            messageCount: body.messages.length,
+            stream: body.stream === true,
+            lastMessage: {
+              role: lastMsg?.role || 'unknown',
+              content: extractSummaryText(lastMsg?.content || '').slice(0, 500)
+            },
+            hasTools: !!(body.tools && body.tools.length > 0),
+            toolChoice: body.tool_choice || 'auto'
+          };
         }
         // Ollama /api/generate format: { prompt: "..." , system: "..." }
         else if (body.prompt !== undefined) {
@@ -373,18 +393,31 @@ const proxyServer = http.createServer((req, res) => {
             hasDecoded: decodedText.length > 0
           };
           
-          // Finalizuj decoded tool_calls
+          // Finalizuj decoded tool_calls — match id from requestToolCalls by function name
           const finalToolCalls = partialToolCalls
             .filter(tc => tc.function && tc.function.name)
-            .map(tc => ({
-              function: {
-                name: tc.function.name,
-                arguments: (() => {
-                  try { return JSON.parse(tc.function.arguments); } catch(e) { return tc.function.arguments; }
-                })()
+            .map(tc => {
+              // Find matching requestToolCall by function name (not by index)
+              let matchedId = null;
+              const fnName = tc.function.name;
+              if (logEntry.requestToolCalls) {
+                const match = logEntry.requestToolCalls.find(rtc => rtc.function && rtc.function.name === fnName);
+                if (match && match.id) matchedId = match.id;
               }
-            }));
-          logEntry.toolCallsExec = finalToolCalls;
+              return {
+                id: matchedId,
+                function: {
+                  name: fnName,
+                  arguments: (() => {
+                    try { return JSON.parse(tc.function.arguments); } catch(e) { return tc.function.arguments; }
+                  })()
+                }
+              };
+            });
+          // Only set toolCallsExec if we actually got tool calls (empty [] overwrites requestToolCalls)
+          if (finalToolCalls.length > 0) {
+            logEntry.toolCallsExec = finalToolCalls;
+          }
           
           logEntry.responseSize = fullResponseRaw.length;
           logEntry.decodedText = decodedText;
@@ -442,12 +475,22 @@ const proxyServer = http.createServer((req, res) => {
               // Extract tool_calls from non-streaming response
               const respTools = resp.message?.tool_calls || resp.choices?.[0]?.message?.tool_calls;
               if (Array.isArray(respTools) && respTools.length > 0) {
-                logEntry.toolCallsExec = respTools.map(tc => ({
-                  function: {
-                    name: tc.function?.name || 'unknown',
-                    arguments: (() => { try { return JSON.parse(tc.function?.arguments); } catch(e) { return tc.function?.arguments || ''; } })()
+                logEntry.toolCallsExec = respTools.map(tc => {
+                  // Find matching requestToolCall by function name
+                  let matchedId = null;
+                  const fnName = tc.function?.name || 'unknown';
+                  if (logEntry.requestToolCalls) {
+                    const match = logEntry.requestToolCalls.find(rtc => rtc.function && rtc.function.name === fnName);
+                    if (match && match.id) matchedId = match.id;
                   }
-                }));
+                  return {
+                    id: matchedId,
+                    function: {
+                      name: fnName,
+                      arguments: (() => { try { return JSON.parse(tc.function?.arguments); } catch(e) { return tc.function?.arguments || ''; } })()
+                    }
+                  };
+                });
               }
               if (decodedText) logEntry.decodedText = decodedText;
             } catch (e) { /* JSON parse failed for non-streaming decoded, ignore */ }

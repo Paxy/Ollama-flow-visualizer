@@ -68,7 +68,17 @@
     .lbl{color:#bd93f9;font-weight:600;margin-bottom:4px;display:inline-block}
     .detail-section{margin-bottom:10px;padding:8px;background:#0d1117;border-radius:4px;border:1px solid #21262d}
     .detail-section pre{margin:4px 0 0;font-size:.68rem;max-height:300px;overflow-y:auto}
-    .req-body-raw{white-space:pre-wrap !important;word-break:break-word !important;line-height:1.5 !important;font-size:.72rem !important;max-height:none !important;color:#c5c8c6}
+    .req-body-raw{white-space:pre-wrap !important;word-break:break-word !important;line-height:1.5 !important;font-size:.72rem !important;max-height:none !important;color:#c5c8c6;display:none}
+    .req-body-raw.show{display:block}
+    .req-summary{font-size:.8rem;padding:10px;margin-bottom:8px;border:1px solid #3a3f4a;border-radius:6px;background:#1a1f26;color:#c5c8c6}
+    .req-summary .summary-row{display:flex;gap:8px;margin:4px 0}
+    .req-summary .summary-label{color:#5a9eff;font-weight:600}
+    .req-summary .summary-content{color:#b5b9c0}
+    .req-summary .truncate{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+    .req-summary .expand-btn{color:#5a9eff;cursor:pointer;font-size:.7rem;text-decoration:underline}
+    .req-summary .expand-btn:hover{color:#7ab8ff}
+    .req-summary pre{display:none;white-space:pre-wrap;word-break:break-word;font-size:.7rem;color:#b5b9c0;margin-top:8px}
+    .req-summary pre.expanded{display:block}
     .req-collapsed{display:none}
     .req-collapsed.show{display:block}
     .req-toggle{cursor:pointer;user-select:none}
@@ -91,12 +101,6 @@
 <script>
 let logs=[];
 let groupsTicker = null; // jedan interval za sve grupe (ticka svake 2s)
-
-// Globalni set tool call ID-eva koji su već prikazani (tako da se ne dupliraju)
-let displayedToolCallIds = new Set();
-// Set fingerprinta (name|args) za cross-source dedup:
-// toolCallsExec (bez ID-eva) -> requestToolCalls (sa ID-evima)
-let displayedToolCallFingerprints = new Set();
 
 // Sačuvaj proširena stanja: expandedGroups = {key: true}
 let expandedGroups = {};
@@ -150,115 +154,83 @@ function makeGroupKey(log) {
   return prompt;
 }
 
-// Globalni set za deduplikaciju tool call prikaza
-// Jednom prikazan ID se ne prikazuje ponovo ni u jednom drugom zahtevu
-function deduplicateToolIds(ids, tcById) {
-  return ids.filter(tcId => {
-    // String ID-evi: proveri u displayedToolCallIds
-    if (typeof tcId === 'string' && displayedToolCallIds.has(tcId)) return false;
-    // Numerički / drugi: proveri fingerprint (name|args)
-    const tc = typeof tcId === 'string' ? tcById[tcId] : null;
-    if (tc) {
-      const fp = tc.function?.name + '|' + JSON.stringify(tc.function?.arguments || tc.function?.rawArgs || '');
-      if (displayedToolCallFingerprints.has(fp)) return false;
-    }
-    return true;
+// Helper: accordion — collapse others on expand
+function toggleGroup(el) {
+  document.querySelectorAll('.group .g-hdr.expanded').forEach(h => {
+    if (h !== el) { h.classList.remove('expanded'); h.nextElementSibling.classList.remove('open'); }
   });
+  el.classList.toggle('expanded');
+  el.nextElementSibling.classList.toggle('open');
 }
-
-function markToolIdsDisplayed(ids) {
-  ids.forEach(tcId => {
-    if (typeof tcId === 'string') displayedToolCallIds.add(tcId);
-  });
+function toggleReq(el) {
+  const p = el.closest('.g-det');
+  if (p) {
+    p.querySelectorAll('.req-hdr').forEach(h => {
+      if (h !== el) h.nextElementSibling.classList.remove('visible');
+    });
+  }
+  el.nextElementSibling.classList.toggle('visible');
 }
 
 // Helper: uzima tool callove iz odgovarajućeg izvora
 // Prioritizuje toolCallsExec (iz Ollama response streama) nad requestToolCalls (iz request body-ja)
 // jer toolCallsExec sadrži ORIGINALNE tool callove iz prvog odgovora
-function getDisplayToolCalls(item) {
-  // Ako item ima toolCallsExec iz Ollama response-a, koristi njih
-  if (item.toolCallsExec && item.toolCallsExec.length > 0) {
-    return item.toolCallsExec.map(tc => ({
-      id: tc.id || null,
-      function: {
-        name: tc.function?.name || 'unknown',
-        // toolCallsExec ima parsed arguments (objekat), konvertuj u rawArgs za display
-        rawArgs: typeof tc.function?.arguments === 'object'
-          ? JSON.stringify(tc.function?.arguments, null, 2)
-          : (tc.function?.arguments || '{}'),
-        arguments: tc.function?.arguments || '{}'
-      }
-    }));
-  }
-  // Fallback na requestToolCalls (iz request body-ja — sadrži realne ID-eve)
-  return item.requestToolCalls || [];
-}
+// Legacy - unused stubs for backward compat
+getDisplayToolCalls = function(item) { return []; };
+generateToolHtml = function(rtc, tos) { return ''; };
 
-function generateToolHtml(rtc, tos, groupToolOutputsMap) {
-  if (!rtc || !rtc.length) return '';
-  const allIds = [];
+// Generates HTML for tool calls WITH outputs, matched by ID from the group's toolCallsExec.
+// Used in the request where tool outputs arrived.
+function generateToolOutputHtml(gToolCalls, tos) {
+  if (!tos || !tos.length || !gToolCalls || !gToolCalls.length) return '';
+  // Build lookup of tool calls by id
   const tcById = {};
-  const toById = {};
-  rtc.forEach(tc => { if (tc.id) { tcById[tc.id] = tc; if (!allIds.includes(tc.id)) allIds.push(tc.id); } });
-  tos.forEach(to => { if (to.toolCallId) { toById[to.toolCallId] = to; } });
-  // Ako imamo grupni map, dodaj i njegove ID-eve
-  if (groupToolOutputsMap) {
-    groupToolOutputsMap.forEach((v, k) => { if (!toById[k]) toById[k] = v; });
-  }
-  // Popuni allIds iz tcById (tool call ID-evi) + dodaj one koji su samo u outputima
-  rtc.forEach(tc => { if (tc.id && !allIds.includes(tc.id)) allIds.push(tc.id); });
-  tos.forEach(to => { if (to.toolCallId && !allIds.includes(to.toolCallId)) allIds.push(to.toolCallId); });
-  if (groupToolOutputsMap) {
-    groupToolOutputsMap.forEach((v, k) => { if (!allIds.includes(k)) allIds.push(k); });
-  }
-  // Ako nema ID-eva, fallback na index-based
-  if (allIds.length === 0) {
-    for (let ti = 0; ti < Math.max(rtc.length, tos.length); ti++) allIds.push(ti);
-  }
-  // === DEDUP: izbaci ID-eve koji su već prikazani u prethodnim zahtevima ===
-  const dedupedIds = deduplicateToolIds(allIds, tcById);
-  if (dedupedIds.length === 0) return ''; // sve već prikazano
-  // Pre markiranja, upiši i fingerprint-e za cross-source dedup
-  dedupedIds.forEach(tcId => {
-    const tc = (typeof tcId === 'object' ? tcId : (typeof tcId === 'string' ? tcById[tcId] : null)) || null;
-    if (tc && tc.function?.name) {
-      const fp = tc.function.name + '|' + JSON.stringify(tc.function?.arguments || tc.function?.rawArgs || '');
-      displayedToolCallFingerprints.add(fp);
-    }
-  });
-  markToolIdsDisplayed(dedupedIds);
+  gToolCalls.forEach(tc => { if (tc.id) tcById[tc.id] = tc; });
   let html = '';
-  dedupedIds.forEach(tcId => {
-    const tcReq = (typeof tcId === 'string' ? tcById[tcId] : rtc[tcId]) || null;
-    // Prvo probaj per-item toolOutputs, zatim grupni map
-    let tcOut = (typeof tcId === 'string' ? toById[tcId] : tos[tcId]) || null;
-    if (!tcOut && groupToolOutputsMap && typeof tcId === 'string') {
-      tcOut = groupToolOutputsMap.get(tcId) || null;
-    }
-    if (!tcReq && !tcOut) return; // ništa — preskoči
-    const nm = tcReq ? (tcReq.function?.name || tcReq.name || 'unknown') : (tcOut ? (tcOut.name || 'output') : 'unknown');
-    // Pokaži rawArgs (sirovi tekst), zatim parsed arguments (ako se razlikuju)
+  tos.forEach(to => {
+    if (!to.toolCallId) return;
+    const tc = tcById[to.toolCallId] || null;
+    if (!tc) return; // no matching tool call
+    const nm = tc.function?.name || 'unknown';
+    // Format args
     let args = '';
-    let rawArgs = '';
-    if (tcReq) {
-      rawArgs = tcReq.function?.rawArgs || tcReq.function?.arguments || '';
-      if (typeof rawArgs === 'object') { rawArgs = JSON.stringify(rawArgs, null, 2); }
-      let a = tcReq.function?.arguments || tcReq.arguments || '{}';
+    if (tc.function?.arguments) {
+      let a = tc.function.arguments;
       if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
       else if (typeof a === 'string') { try { args = JSON.stringify(JSON.parse(a), null, 2); } catch(e) { args = a; } }
     }
-    let outVal = '(waiting for output...)';
-    if (tcOut) {
-      let v = tcOut.content || tcOut.output || tcOut.result || tcOut.response || tcOut.value || JSON.stringify(tcOut);
-      if (typeof v === 'object') v = JSON.stringify(v, null, 2);
-      else if (typeof v === 'string') v = v.replace(/\\\\n/g, '\n');
-      outVal = v;
+    // Format output
+    let outVal = '';
+    let v = to.content || to.output || to.result || to.response || to.value || JSON.stringify(to);
+    if (typeof v === 'object') v = JSON.stringify(v, null, 2);
+    else if (typeof v === 'string') v = v.replace(/\\n/g, '\n');
+    outVal = v;
+    html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
+    html += '<div class="tp-name" style="color:#ffa657;font-size:.82rem;font-weight:600;margin-bottom:4px">\u26a1 ' + escHtml(nm) + '</div>';
+    if (args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args) + '</pre></div>';
+    html += '<div class="tp-out" style="border-top:1px solid #2a2e35;padding-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Output:</div><pre style="margin:4px 0 0;font-size:.72rem;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(outVal) + '</pre></div>';
+    html += '</div>';
+  });
+  return html;
+}
+
+// Generates HTML for tool calls WITHOUT outputs (the LLM requested tools, waiting for exec).
+// Used in the request where toolCallsExec was received.
+function generateToolCallHtml(calls) {
+  if (!calls || !calls.length) return '';
+  let html = '';
+  calls.forEach(tc => {
+    const nm = tc.function?.name || 'unknown';
+    let args = '';
+    if (tc.function?.arguments) {
+      let a = tc.function.arguments;
+      if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
+      else if (typeof a === 'string') { try { args = JSON.stringify(JSON.parse(a), null, 2); } catch(e) { args = a; } }
     }
     html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
     html += '<div class="tp-name" style="color:#ffa657;font-size:.82rem;font-weight:600;margin-bottom:4px">\u26a1 ' + escHtml(nm) + '</div>';
-    if (rawArgs && rawArgs !== args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCDD Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(rawArgs) + '</pre></div>';
-    if (args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Parsed:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args) + '</pre></div>';
-    html += '<div class="tp-out" style="border-top:1px solid #2a2e35;padding-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Output:</div><pre style="margin:4px 0 0;font-size:.72rem;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(outVal) + '</pre></div>';
+    if (args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args) + '</pre></div>';
+    html += '<div class="tp-out" style="border-top:1px solid #2a2e35;padding-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Exec:</div><div style="color:#8b949e;font-size:.7rem;margin-top:2px">⏳ waiting for output...</div></div>';
     html += '</div>';
   });
   return html;
@@ -302,15 +274,7 @@ function buildGroups() {
         }
       });
     }
-    // Sakupi sve toolOutputs u mapu po toolCallId (ili po indeksu)
-    if (log.toolOutputs && log.toolOutputs.length) {
-      if (!g.toolOutputsMap) g.toolOutputsMap = new Map();
-      log.toolOutputs.forEach((out, oi) => {
-        const tid = out.toolCallId || `idx_${oi}`;
-        // Ako vise outputa ima isti toolCallId, uzmi poslednji
-        g.toolOutputsMap.set(tid, out);
-      });
-    }
+
     if (log.systemContext) g.systemContexts.add(log.systemContext.slice(0, 200));
     if (new Date(log.timestamp) < new Date(g.firstTs)) g.firstTs = log.timestamp;
     if (new Date(log.timestamp) > new Date(g.lastTs)) g.lastTs = log.timestamp;
@@ -426,10 +390,7 @@ function buildGroupHtml(g) {
     decodedHtml = `<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">${escHtml(text)}</div></div>`;
   }
 
-  // Tool calls + outputs section (at group level — shared across all reqs)
-  // Tools are shown in req-body, not at group level
-  // Napravi grupni map tool outputa za unakrsno matchovanje
-  const groupOutputMap = g.toolOutputsMap || new Map();
+  // Tool display per request — each req shows its own tool calls + outputs
 
   // Req rows
   let rowsHtml = '';
@@ -440,19 +401,42 @@ function buildGroupHtml(g) {
 
     const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
     
-    // Tool calls + outputs — koristi toolCallsExec (iz response streama) ako postoji,
-    // inače requestToolCalls (iz request body-ja)
-    let toolPairsHtml = generateToolHtml(getDisplayToolCalls(item), (item.toolOutputs || []), groupOutputMap);
+    // Tool calls/outputs: show tool request where toolCallsExec arrived, outputs matched by ID
+    let toolPairsHtml = '';
+    if (item.toolCallsExec && item.toolCallsExec.length > 0) {
+      toolPairsHtml += generateToolCallHtml(item.toolCallsExec);
+    }
+    if (item.toolOutputs && item.toolOutputs.length > 0) {
+      toolPairsHtml += generateToolOutputHtml(g.toolCallsExec, item.toolOutputs);
+    }
     let rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
-    let rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
+    // Request summary - clean display instead of raw JSON dump
+    let rq = item.requestSummary ? `
+      <div class="detail-section">
+        <div class="req-summary">
+          <span class="summary-label">📤 Request Summary</span>
+          <div class="summary-row"><span class="summary-label">Model:</span><span class="summary-content">${escHtml(item.requestSummary.model || '')}</span></div>
+          ${item.requestSummary.messageCount != null ? `<div class="summary-row"><span class="summary-label">Messages:</span><span class="summary-content">${item.requestSummary.messageCount}</span></div>` : ''}
+          ${item.requestSummary.stream != null ? `<div class="summary-row"><span class="summary-label">Streaming:</span><span class="summary-content">${item.requestSummary.stream ? '✓' : '✗'}</span></div>` : ''}
+          ${item.requestSummary.lastMessage ? `<div class="summary-row"><span class="summary-label">Last message:</span><span class="summary-content">${escHtml(item.requestSummary.lastMessage.role || '')}</span></div>` : ''}
+          ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
+            <div class="summary-row">
+              <span class="summary-label">Content:</span>
+              <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.lastMessage.content)}</span>
+              ${item.requestSummary.lastMessage.content.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
+              <pre style="display:none">${escHtml(item.requestSummary.lastMessage.content)}</pre>
+            </div>` : ''}
+          ${item.requestSummary.hasTools != null ? `<div class="summary-row"><span class="summary-label">Tools:</span><span class="summary-content">${item.requestSummary.hasTools ? '✓ (' + (item.requestSummary.toolChoice || 'auto') + ')' : '✗'}</span></div>` : ''}
+        </div>
+      </div>` : '';
     rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
-      `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}</span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
+      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}</span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
       `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}${toolPairsHtml}</div></div>`;
   });
 
   var tsIcon = '&#128197;'; // calendar
   var durIcon = '&#9201;'; // stopwatch
-  return `<div class="g-hdr" onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('open')"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span><span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span><span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
 function render(groups) {
@@ -567,12 +551,36 @@ function render(groups) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            // Tool calls + outputs — koristi toolCallsExec (iz response streama) ako postoji
-            let toolPairsHtml = generateToolHtml(getDisplayToolCalls(item), (item.toolOutputs || []), g.toolOutputsMap);
+            // Tool calls/outputs: show tool request where toolCallsExec arrived, outputs matched by ID
+            let toolPairsHtml = '';
+            if (item.toolCallsExec && item.toolCallsExec.length > 0) {
+              toolPairsHtml += generateToolCallHtml(item.toolCallsExec);
+            }
+            if (item.toolOutputs && item.toolOutputs.length > 0) {
+              toolPairsHtml += generateToolOutputHtml(g.toolCallsExec, item.toolOutputs);
+            }
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
-            const rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
+            // Request summary - clean display instead of raw JSON dump
+            const rq = item.requestSummary ? `
+              <div class="detail-section">
+                <div class="req-summary">
+                  <span class="summary-label">📤 Request Summary</span>
+                  <div class="summary-row"><span class="summary-label">Model:</span><span class="summary-content">${escHtml(item.requestSummary.model || '')}</span></div>
+                  ${item.requestSummary.messageCount != null ? `<div class="summary-row"><span class="summary-label">Messages:</span><span class="summary-content">${item.requestSummary.messageCount}</span></div>` : ''}
+                  ${item.requestSummary.stream != null ? `<div class="summary-row"><span class="summary-label">Streaming:</span><span class="summary-content">${item.requestSummary.stream ? '✓' : '✗'}</span></div>` : ''}
+                  ${item.requestSummary.lastMessage ? `<div class="summary-row"><span class="summary-label">Last message:</span><span class="summary-content">${escHtml(item.requestSummary.lastMessage.role || '')}</span></div>` : ''}
+                  ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
+                    <div class="summary-row">
+                      <span class="summary-label">Content:</span>
+                      <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.lastMessage.content)}</span>
+                      ${item.requestSummary.lastMessage.content.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
+                      <pre style="display:none">${escHtml(item.requestSummary.lastMessage.content)}</pre>
+                    </div>` : ''}
+                  ${item.requestSummary.hasTools != null ? `<div class="summary-row"><span class="summary-label">Tools:</span><span class="summary-content">${item.requestSummary.hasTools ? '✓ (' + (item.requestSummary.toolChoice || 'auto') + ')' : '✗'}</span></div>` : ''}
+                </div>
+              </div>` : '';
             // Replace entire innerHTML (header + body)
-            reqEl.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             if (wasVisible) {
               const nb = reqEl.querySelector('.req-body');
               if (nb) nb.classList.add('visible');
@@ -584,14 +592,20 @@ function render(groups) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            // Tool calls + outputs — koristi toolCallsExec (iz response streama) ako postoji
-            let toolPairsHtml = generateToolHtml(getDisplayToolCalls(item), (item.toolOutputs || []), g.toolOutputsMap);
+            // Tool calls/outputs: show tool request where toolCallsExec arrived, outputs matched by ID
+            let toolPairsHtml = '';
+            if (item.toolCallsExec && item.toolCallsExec.length > 0) {
+              toolPairsHtml += generateToolCallHtml(item.toolCallsExec);
+            }
+            if (item.toolOutputs && item.toolOutputs.length > 0) {
+              toolPairsHtml += generateToolOutputHtml(g.toolCallsExec, item.toolOutputs);
+            }
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             const rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
             const nr = document.createElement('div');
             nr.className = 'req-row';
             nr.dataset.reqId = item.id;
-            nr.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             const firstReq = det.querySelector('.req-row');
             if (firstReq) det.insertBefore(nr, firstReq);
             else det.appendChild(nr);
@@ -725,12 +739,12 @@ setInterval(pollLogs, 5000); // polling samo kad Socket.IO padne
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clrBtn').onclick = () => {
   fetch('/api/logs', { method: 'DELETE' }).then(r => r.json()).then(() => {
-    logs = []; expandedGroups = {}; displayedToolCallIds = new Set(); displayedToolCallFingerprints = new Set(); refresh();
-  }).catch(() => { logs = []; expandedGroups = {}; displayedToolCallIds = new Set(); displayedToolCallFingerprints = new Set(); refresh(); });
+    logs = []; expandedGroups = {}; refresh();
+  }).catch(() => { logs = []; expandedGroups = {}; refresh(); });
 };
   startGroupsTicker();
   
-  socket.on('init', data => { logs = data; displayedToolCallIds = new Set(); displayedToolCallFingerprints = new Set(); refresh(); });
+  socket.on('init', data => { logs = data; refresh(); });
   socket.on('log-update', payload => {
     const i = logs.findIndex(l => l.id === payload.id);
     if (i >= 0) logs[i] = payload;
