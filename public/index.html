@@ -61,8 +61,8 @@
     .req-hdr .r-st.err{color:#ff5555}
     .req-hdr .r-st.stream{color:#f1fa8c}
     .req-hdr .r-st.pend{color:#ff5555}
-    .req-hdr .r-preview{color:#6272a4;font-size:.7rem;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-left:auto}
-    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;margin-left:12px}
+    .req-hdr .r-preview{color:#6272a4;font-size:.7rem;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;margin-left:auto;padding-left:12px}
     .req-body{display:none;margin-top:8px;background:#060a10;border:1px solid #1a1e24;border-radius:6px;padding:12px;overflow-x:auto;font-size:.72rem;line-height:1.5;max-height:60vh;overflow-y:auto}
     .req-body.visible{display:block}
     .lbl{color:#bd93f9;font-weight:600;margin-bottom:4px;display:inline-block}
@@ -91,6 +91,12 @@
 <script>
 let logs=[];
 let groupsTicker = null; // jedan interval za sve grupe (ticka svake 2s)
+
+// Globalni set tool call ID-eva koji su već prikazani (tako da se ne dupliraju)
+let displayedToolCallIds = new Set();
+// Set fingerprinta (name|args) za cross-source dedup:
+// toolCallsExec (bez ID-eva) -> requestToolCalls (sa ID-evima)
+let displayedToolCallFingerprints = new Set();
 
 // Sačuvaj proširena stanja: expandedGroups = {key: true}
 let expandedGroups = {};
@@ -144,6 +150,50 @@ function makeGroupKey(log) {
   return prompt;
 }
 
+// Globalni set za deduplikaciju tool call prikaza
+// Jednom prikazan ID se ne prikazuje ponovo ni u jednom drugom zahtevu
+function deduplicateToolIds(ids, tcById) {
+  return ids.filter(tcId => {
+    // String ID-evi: proveri u displayedToolCallIds
+    if (typeof tcId === 'string' && displayedToolCallIds.has(tcId)) return false;
+    // Numerički / drugi: proveri fingerprint (name|args)
+    const tc = typeof tcId === 'string' ? tcById[tcId] : null;
+    if (tc) {
+      const fp = tc.function?.name + '|' + JSON.stringify(tc.function?.arguments || tc.function?.rawArgs || '');
+      if (displayedToolCallFingerprints.has(fp)) return false;
+    }
+    return true;
+  });
+}
+
+function markToolIdsDisplayed(ids) {
+  ids.forEach(tcId => {
+    if (typeof tcId === 'string') displayedToolCallIds.add(tcId);
+  });
+}
+
+// Helper: uzima tool callove iz odgovarajućeg izvora
+// Prioritizuje toolCallsExec (iz Ollama response streama) nad requestToolCalls (iz request body-ja)
+// jer toolCallsExec sadrži ORIGINALNE tool callove iz prvog odgovora
+function getDisplayToolCalls(item) {
+  // Ako item ima toolCallsExec iz Ollama response-a, koristi njih
+  if (item.toolCallsExec && item.toolCallsExec.length > 0) {
+    return item.toolCallsExec.map(tc => ({
+      id: tc.id || null,
+      function: {
+        name: tc.function?.name || 'unknown',
+        // toolCallsExec ima parsed arguments (objekat), konvertuj u rawArgs za display
+        rawArgs: typeof tc.function?.arguments === 'object'
+          ? JSON.stringify(tc.function?.arguments, null, 2)
+          : (tc.function?.arguments || '{}'),
+        arguments: tc.function?.arguments || '{}'
+      }
+    }));
+  }
+  // Fallback na requestToolCalls (iz request body-ja — sadrži realne ID-eve)
+  return item.requestToolCalls || [];
+}
+
 function generateToolHtml(rtc, tos, groupToolOutputsMap) {
   if (!rtc || !rtc.length) return '';
   const allIds = [];
@@ -165,8 +215,20 @@ function generateToolHtml(rtc, tos, groupToolOutputsMap) {
   if (allIds.length === 0) {
     for (let ti = 0; ti < Math.max(rtc.length, tos.length); ti++) allIds.push(ti);
   }
+  // === DEDUP: izbaci ID-eve koji su već prikazani u prethodnim zahtevima ===
+  const dedupedIds = deduplicateToolIds(allIds, tcById);
+  if (dedupedIds.length === 0) return ''; // sve već prikazano
+  // Pre markiranja, upiši i fingerprint-e za cross-source dedup
+  dedupedIds.forEach(tcId => {
+    const tc = (typeof tcId === 'object' ? tcId : (typeof tcId === 'string' ? tcById[tcId] : null)) || null;
+    if (tc && tc.function?.name) {
+      const fp = tc.function.name + '|' + JSON.stringify(tc.function?.arguments || tc.function?.rawArgs || '');
+      displayedToolCallFingerprints.add(fp);
+    }
+  });
+  markToolIdsDisplayed(dedupedIds);
   let html = '';
-  allIds.forEach(tcId => {
+  dedupedIds.forEach(tcId => {
     const tcReq = (typeof tcId === 'string' ? tcById[tcId] : rtc[tcId]) || null;
     // Prvo probaj per-item toolOutputs, zatim grupni map
     let tcOut = (typeof tcId === 'string' ? toById[tcId] : tos[tcId]) || null;
@@ -325,7 +387,15 @@ function buildGroupHtml(g) {
   const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
   const cnt = g.items.length;
   const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
-  const stLbl = st === 'error' ? '⚠ Interrupted' : (st === 'active' ? '⏳ Active' : '✓ Completed');
+  let stLbl;
+  if (st === 'error') {
+    let firstError = '';
+    g.items.forEach(item => { if (item.error && !firstError) firstError = item.error; });
+    const isOllamaErr = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(firstError);
+    stLbl = isOllamaErr ? '⚠ Ollama' : '⚠ Interrupted';
+  } else {
+    stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
+  }
   const display = g.prompt.length > 600 ? g.prompt.slice(0, 600) + '…' : g.prompt;
   // Collect all tools from items that have them (each item provides its own requestToolCalls)
   const allToolCalls = [];
@@ -338,13 +408,19 @@ function buildGroupHtml(g) {
   });
   const hasTools = allToolCalls.length > 0;
 
-  // Decoded section — uzmi najduži decodedText iz svih item-a
+  // Decoded section — uzmi najduži decodedText ili error iz svih item-a
   let decodedHtml = '';
   let bestDecoded = '';
+  let groupError = null;
   g.items.forEach(item => {
     if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+    if (item.error && !groupError) groupError = item.error;
   });
-  if (bestDecoded) {
+  if (groupError && !bestDecoded) {
+    const isOllamaError = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(groupError);
+    const agent = isOllamaError ? 'Ollama' : 'Agent';
+    decodedHtml = `<div class="detail-section"><span class="lbl">⚠️ Error (${agent}):</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a">${escHtml(groupError)}</div></div>`;
+  } else if (bestDecoded) {
     const maxDecoded = 5000;
     const text = bestDecoded.length > maxDecoded ? bestDecoded.slice(0, maxDecoded) + '\n[TRUNCATED]' : bestDecoded;
     decodedHtml = `<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">${escHtml(text)}</div></div>`;
@@ -360,19 +436,23 @@ function buildGroupHtml(g) {
   g.items.forEach((item, idx) => {
     const rIcon = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
     const rCls = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
+    const rErr = item.error ? escHtml(item.error.slice(0,300)) : '';
 
-    const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : '';
+    const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
     
-    // Tool calls + outputs linked by order (requestToolCalls[i] → toolOutputs[i])
-    let toolPairsHtml = generateToolHtml(item.requestToolCalls || [], (item.toolOutputs || []), groupOutputMap);
+    // Tool calls + outputs — koristi toolCallsExec (iz response streama) ako postoji,
+    // inače requestToolCalls (iz request body-ja)
+    let toolPairsHtml = generateToolHtml(getDisplayToolCalls(item), (item.toolOutputs || []), groupOutputMap);
     let rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
     let rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
     rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
       `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}</span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
-      `<div class="req-body">${rb}${rq}${toolPairsHtml}</div></div>`;
+      `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}${toolPairsHtml}</div></div>`;
   });
 
-  return `<div class="g-hdr" onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('open')"><span class="arrow">▶</span><span class="ts">📅 ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span><span class="status ${stCls}">${stLbl}</span><span class="dur">⏱ ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">🛠 ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+  var tsIcon = '&#128197;'; // calendar
+  var durIcon = '&#9201;'; // stopwatch
+  return `<div class="g-hdr" onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('open')"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span><span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
 function render(groups) {
@@ -431,7 +511,14 @@ function render(groups) {
       if (hdr) {
         const st = groupStatus(g);
         const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
-        const stLbl = st === 'error' ? '⚠ Interrupted' : (st === 'active' ? '⏳ Active' : '✓ Completed');
+        let stLbl;
+        if (st === 'error') {
+          let fe = '';
+          g.items.forEach(function(i){if(i.error&&!fe)fe=i.error;});
+          stLbl = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(fe) ? '⚠ Ollama' : '⚠ Interrupted';
+        } else {
+          stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
+        }
         const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
         hdr.querySelector('.status').className = `status ${stCls}`;
         hdr.querySelector('.status').textContent = stLbl;
@@ -442,17 +529,29 @@ function render(groups) {
       const det = el.querySelector('.g-det');
       if (det) {
         let bestDecoded = '';
+        let groupError = null;
         g.items.forEach(item => {
           if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+          if (item.error && !groupError) groupError = item.error;
         });
-        const oldDecodedLabel = det.querySelector('.decoded-prompt');
-        const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
-        if (bestDecoded.length > oldDecodedText.length) {
-          const maxD = 5000;
-          const txt = bestDecoded.length > maxD ? bestDecoded.slice(0, maxD) + '\n[TRUNCATED]' : bestDecoded;
-          const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
-          if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
-          else det.insertAdjacentHTML('afterbegin', newSec);
+        const oldDecodedSec = det.querySelector('.detail-section .lbl');
+        if (groupError && !bestDecoded) {
+          const isOllamaError = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(groupError);
+          const agent = isOllamaError ? 'Ollama' : 'Agent';
+          const errHtml = '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error (' + agent + '):</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a">' + escHtml(groupError) + '</div></div>';
+          const oldErrLabel = det.querySelector('.decoded-prompt');
+          if (oldErrLabel) oldErrLabel.closest('.detail-section').outerHTML = errHtml;
+          else det.insertAdjacentHTML('afterbegin', errHtml);
+        } else if (bestDecoded.length > 0) {
+          const oldDecodedLabel = det.querySelector('.decoded-prompt');
+          const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
+          if (bestDecoded.length > oldDecodedText.length) {
+            const maxD = 5000;
+            const txt = bestDecoded.length > maxD ? bestDecoded.slice(0, maxD) + '\n[TRUNCATED]' : bestDecoded;
+            const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
+            if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
+            else det.insertAdjacentHTML('afterbegin', newSec);
+          }
         }
         // Upsert req-row-ova
         const knownIds = new Set();
@@ -466,13 +565,14 @@ function render(groups) {
             const idx = g.items.length;
             const ri = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
-            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : '';
-            // Tool calls + outputs linked by order
-            let toolPairsHtml = generateToolHtml(item.requestToolCalls || [], (item.toolOutputs || []), g.toolOutputsMap);
+            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
+            const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
+            // Tool calls + outputs — koristi toolCallsExec (iz response streama) ako postoji
+            let toolPairsHtml = generateToolHtml(getDisplayToolCalls(item), (item.toolOutputs || []), g.toolOutputsMap);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             const rq = item.requestBody ? `<div class="detail-section"><span class="lbl">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
             // Replace entire innerHTML (header + body)
-            reqEl.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rb}${rq}${toolPairsHtml}</div>`;
+            reqEl.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             if (wasVisible) {
               const nb = reqEl.querySelector('.req-body');
               if (nb) nb.classList.add('visible');
@@ -482,15 +582,16 @@ function render(groups) {
             const idx = g.items.length;
             const ri = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
-            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : '';
-            // Tool calls + outputs linked by order
-            let toolPairsHtml = generateToolHtml(item.requestToolCalls || [], (item.toolOutputs || []), g.toolOutputsMap);
+            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
+            const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
+            // Tool calls + outputs — koristi toolCallsExec (iz response streama) ako postoji
+            let toolPairsHtml = generateToolHtml(getDisplayToolCalls(item), (item.toolOutputs || []), g.toolOutputsMap);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             const rq = item.requestBody ? `<div class="detail-section"><span class="lbl">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
             const nr = document.createElement('div');
             nr.className = 'req-row';
             nr.dataset.reqId = item.id;
-            nr.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rb}${rq}${toolPairsHtml}</div>`;
+            nr.innerHTML = `<div class="req-hdr" onclick="this.nextElementSibling.classList.toggle('visible')"><span class="r-num">${idx}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             const firstReq = det.querySelector('.req-row');
             if (firstReq) det.insertBefore(nr, firstReq);
             else det.appendChild(nr);
@@ -503,7 +604,14 @@ function render(groups) {
             const st = groupStatus(g);
             const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
             const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
-            const stLbl = st === 'error' ? '⚠ Interrupted' : (st === 'active' ? '⏳ Active' : '✓ Completed');
+            let stLbl;
+            if (st === 'error') {
+              let fe = '';
+              grp.items.forEach(function(i){if(i.error&&!fe)fe=i.error;});
+              stLbl = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(fe) ? '⚠ Ollama' : '⚠ Interrupted';
+            } else {
+              stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
+            }
             hdr.querySelector('.status').textContent = stLbl;
             hdr.querySelector('.status').className = 'status ' + stCls;
             hdr.querySelector('.dur').textContent = '\u23f1 ' + dur;
@@ -617,12 +725,12 @@ setInterval(pollLogs, 5000); // polling samo kad Socket.IO padne
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clrBtn').onclick = () => {
   fetch('/api/logs', { method: 'DELETE' }).then(r => r.json()).then(() => {
-    logs = []; expandedGroups = {}; refresh();
-  }).catch(() => { logs = []; expandedGroups = {}; refresh(); });
+    logs = []; expandedGroups = {}; displayedToolCallIds = new Set(); displayedToolCallFingerprints = new Set(); refresh();
+  }).catch(() => { logs = []; expandedGroups = {}; displayedToolCallIds = new Set(); displayedToolCallFingerprints = new Set(); refresh(); });
 };
   startGroupsTicker();
   
-  socket.on('init', data => { logs = data; refresh(); });
+  socket.on('init', data => { logs = data; displayedToolCallIds = new Set(); displayedToolCallFingerprints = new Set(); refresh(); });
   socket.on('log-update', payload => {
     const i = logs.findIndex(l => l.id === payload.id);
     if (i >= 0) logs[i] = payload;
