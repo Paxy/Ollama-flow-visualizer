@@ -4,7 +4,15 @@ Transparent Ollama proxy with live request/response monitoring dashboard.
 
 Intercepts all requests to Ollama, logs them in real-time, and displays them in a group-by-prompt dashboard with tool call matching, streaming visibility, and duration tracking.
 
+## Screenshots
+
 ![Ollama Flow Visualizer dashboard](docs/screenshots/dashboard.png)
+
+*Full dashboard view — grouped requests, tool calls, decoded responses, and error details.*
+
+![Dashboard viewport](docs/screenshots/dashboard-viewport.png)
+
+*Alternative viewport showing grouped flows with status indicators and live streaming durations.*
 
 ## Features
 
