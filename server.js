@@ -33,7 +33,7 @@ const TARGET_URL = `http://${OLLAMA_HOST}:${OLLAMA_PORT}`;
 const MAX_LOGS = config.limits?.maxLogs || 500;
 const REQ_BODY_MAX = config.limits?.requestBodyMaxChars || 5000;
 const TOOL_OUT_MAX = config.limits?.toolOutputMaxChars || 2000;
-const DECODED_MAX  = config.limits?.decodedTextMaxChars || 5000;
+
 const requestLogs = [];
 
 function addLog(entry) {
@@ -380,9 +380,7 @@ const proxyServer = http.createServer((req, res) => {
             raw: fullResponseRaw.length > TOOL_OUT_MAX 
               ? fullResponseRaw.slice(0, TOOL_OUT_MAX) + '...(truncated)' 
               : fullResponseRaw,
-            decoded: decodedText.length > 3000 
-              ? decodedText.slice(0, 3000) + '...(truncated)' 
-              : decodedText,
+            decoded: decodedText,
             hasDecoded: decodedText.length > 0
           };
           
@@ -415,8 +413,8 @@ const proxyServer = http.createServer((req, res) => {
           logEntry.responseSize = fullResponseRaw.length;
           logEntry.decodedText = decodedText;
           logEntry.responseBody = decodedText.length > 0
-            ? decodedText.slice(0, DECODED_MAX)
-            : (fullResponseRaw.length > DECODED_MAX ? fullResponseRaw.slice(0, DECODED_MAX) + '...(truncated)' : fullResponseRaw);
+            ? decodedText
+            : fullResponseRaw;
           logEntry.status = 'completed';
           stopTick();
           addLog(logEntry);
@@ -489,8 +487,8 @@ const proxyServer = http.createServer((req, res) => {
             } catch (e) { /* JSON parse failed for non-streaming decoded, ignore */ }
             
             logEntry.responseBody = decodedText
-              ? decodedText.slice(0, DECODED_MAX)
-              : (responseStr.length > DECODED_MAX ? responseStr.slice(0, DECODED_MAX) + '...(truncated)' : responseStr);
+              ? decodedText
+              : responseStr;
           } catch (e) {
             logEntry.responseBody = '(binary response)';
           }

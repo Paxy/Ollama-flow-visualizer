@@ -15,7 +15,6 @@
     "maxLogs": 500,
     "requestBodyMaxChars": 50000,
     "toolOutputMaxChars": 4000,
-    "decodedTextMaxChars": 50000,
     "streamTimeoutMs": 600000
   }
 }

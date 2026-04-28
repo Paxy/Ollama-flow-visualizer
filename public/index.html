@@ -186,12 +186,12 @@ function highlightJSON(s){if(!s)return '';let a=escHtml(s);a=a.replace(/("(\\u[\
 // Svaki "zaokruženi" tok je jedno grupisanje
 
 function makeGroupKey(log) {
-  // Group exclusively by user prompt — same prompt = same group
+  // Group exclusively by user prompt - same prompt = same group
   const prompt = normalizePrompt(log.userPrompt) || 'NO_PROMPT';
   return prompt;
 }
 
-// Helper: accordion — collapse others on expand
+// Helper: accordion - collapse others on expand
 function toggleGroup(el) {
   document.querySelectorAll('.group .g-hdr.expanded').forEach(h => {
     if (h !== el) { h.classList.remove('expanded'); h.nextElementSibling.classList.remove('open'); }
@@ -278,7 +278,7 @@ function generateToolCallHtml(calls) {
 function buildGroups() {
   if (logs.length === 0) return {};
   const map = new Map();
-  
+
   logs.forEach(log => {
     const key = makeGroupKey(log);
     let g = map.get(key);
@@ -320,7 +320,7 @@ function buildGroups() {
     if (new Date(log.timestamp) < new Date(g.firstTs)) g.firstTs = log.timestamp;
     if (new Date(log.timestamp) > new Date(g.lastTs)) g.lastTs = log.timestamp;
   });
-  
+
   // Sortiraj: od najstarijeg ka najnovijem (chronological)
   map.forEach(g => g.items.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
   console.log('[BUILD] grupe:', [...map.entries()].map(([k,g]) => ({key:k, lastTs:g.lastTs, firstTs:g.firstTs, cnt:g.items.length})));
@@ -401,7 +401,7 @@ function buildGroupHtml(g) {
   } else {
     stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
   }
-  const display = g.prompt.length > 600 ? g.prompt.slice(0, 600) + '…' : g.prompt;
+  const display = g.prompt.length > 600 ? g.prompt.slice(0, 600) + '...' : g.prompt;
   // Collect all tools from items that have them (each item provides its own requestToolCalls)
   const allToolCalls = [];
   const seenTool = new Set();
@@ -413,7 +413,7 @@ function buildGroupHtml(g) {
   });
   const hasTools = allToolCalls.length > 0;
 
-  // Decoded section — uzmi najduži decodedText ili error iz svih item-a
+  // Decoded section - uzmi najduži decodedText ili error iz svih item-a
   let decodedHtml = '';
   // Collect ALL unique decoded texts chronologically, concatenated
   let bestDecoded = '';
@@ -434,20 +434,20 @@ function buildGroupHtml(g) {
     const agent = isOllamaError ? 'Ollama' : 'Agent';
     decodedHtml = `<div class="detail-section"><span class="lbl">⚠️ Error (${agent}):</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a">${escHtml(groupError)}</div></div>`;
   } else if (bestDecoded) {
-    const maxDecoded = 5000;
-    const text = bestDecoded.length > maxDecoded ? bestDecoded.slice(0, maxDecoded) + '\n[TRUNCATED]' : bestDecoded;
-    decodedHtml = `<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">${escHtml(text)}</div></div>`;
+    decodedHtml = `<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">${escHtml(bestDecoded)}</div></div>`;
   }
 
-  // Tool display per request — each req shows its own tool calls + outputs
+  // Tool display per request - each req shows its own tool calls + outputs
 
   // Req rows
   let rowsHtml = '';
   g.items.forEach((item, idx) => {
     const rIcon = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
+    const rLbl = item.status === 'error' ? '❌ Error' : (item.status === 'pending' ? '⏳ Waiting for response' : (item.status === 'streaming' ? '🌊 Waiting for response' : '✅'));
     const rCls = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
+    const rLblCss = item.status === 'pending' || item.status === 'streaming' ? 'font-size:.65rem;color:#6a6e75;margin-left:4px;font-weight:400' : '';
     const rErr = item.error ? escHtml(item.error.slice(0,300)) : '';
-
+    
     const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
     
     // Tool calls/outputs: show tool exec (from toolCallsExec or requestToolCalls), outputs matched by ID
@@ -485,7 +485,7 @@ function buildGroupHtml(g) {
         </div>
       </div>` : '';
     rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
-      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}</span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
+      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}<span class="r-st-text" style="${rLblCss}">${rLbl.split(' ').slice(1).join(' ')}</span></span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
       `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}${toolPairsHtml}</div></div>`;
   });
 
@@ -496,7 +496,7 @@ function buildGroupHtml(g) {
 
 function render(groups) {
   const container = document.getElementById('groups');
-  const sorted = Object.values(groups).sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs));
+  const sorted = Object.values(groups).sort((a, b) => new Date(a.lastTs) - new Date(b.lastTs));
 
   // Sacuvaj expand state iz DOM-a pre bilo kakvih promena
   const oldExpanded = {};
@@ -520,7 +520,7 @@ function render(groups) {
   sorted.forEach((g) => {
     let el = container.querySelector(`.group[data-group-key="${CSS.escape(g.key)}"]`);
     if (!el) {
-      // New group — create
+      // New group - create
       el = document.createElement('div');
       el.className = 'group';
       el.dataset.groupKey = g.key;
@@ -534,7 +534,7 @@ function render(groups) {
         container.appendChild(el);
       }
     } else {
-      // Existing group — update content
+      // Existing group - update content
       // Prvo proveri da li je na pravom mestu
       if (prevEl) {
         const expectedNext = prevEl.nextSibling;
@@ -544,7 +544,7 @@ function render(groups) {
       } else if (container.firstChild && container.firstChild !== el) {
         container.insertBefore(el, container.firstChild);
       }
-      
+
       // Azuriraj header info
       const hdr = el.querySelector('.g-hdr');
       if (hdr) {
@@ -564,7 +564,7 @@ function render(groups) {
         hdr.querySelector('.dur').textContent = `⏱ ${dur}`;
         hdr.querySelector('.count').textContent = `${g.items.length}x`;
       }
-      // Update decodedText — concatenate all unique texts chronologically
+      // Update decodedText - concatenate all unique texts chronologically
       const det = el.querySelector('.g-det');
       if (det) {
         let fullText = '';
@@ -588,15 +588,15 @@ function render(groups) {
           const oldErrLabel = det.querySelector('.decoded-prompt');
           if (oldErrLabel) oldErrLabel.closest('.detail-section').outerHTML = errHtml;
           else det.insertAdjacentHTML('afterbegin', errHtml);
+          const dp = det.querySelector('.decoded-prompt'); if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
         } else if (fullText.length > 0) {
           const oldDecodedLabel = det.querySelector('.decoded-prompt');
           const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
           if (fullText.length > oldDecodedText.length) {
-            const maxD = 5000;
-            const txt = fullText.length > maxD ? fullText.slice(0, maxD) + '\n[TRUNCATED]' : fullText;
-            const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
+            const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
             if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
             else det.insertAdjacentHTML('afterbegin', newSec);
+            const dp = det.querySelector('.decoded-prompt'); if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
           }
         }
         // Upsert req-row-ova
@@ -611,7 +611,7 @@ function render(groups) {
             const idx = g.items.length;
             const ri = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
-            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
+            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
             // Tool calls/outputs: show tool exec (from toolCallsExec or requestToolCalls), outputs matched by ID
             let toolPairsHtml = '';
@@ -642,7 +642,7 @@ function render(groups) {
                   ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
                     <div class="summary-row">
                       <span class="summary-label">Last msg content:</span>
-                      <span class="summary-content" style="color:#6a6e75;font-size:.7rem;">${escHtml(item.requestSummary.lastMessage.content.slice(0, 300))}${item.requestSummary.lastMessage.content.length > 300 ? '…' : ''}</span>
+                      <span class="summary-content" style="color:#6a6e75;font-size:.7rem;">${escHtml(item.requestSummary.lastMessage.content.slice(0, 300))}${item.requestSummary.lastMessage.content.length > 300 ? '...' : ''}</span>
                     </div>` : ''}
                   ${item.requestSummary.hasTools != null ? `<div class="summary-row"><span class="summary-label">Tools:</span><span class="summary-content">${item.requestSummary.hasTools ? '✓ (' + (item.requestSummary.toolChoice || 'auto') + ')' : '✗'}</span></div>` : ''}
                 </div>
@@ -654,11 +654,11 @@ function render(groups) {
               if (nb) nb.classList.add('visible');
             }
           } else {
-            // New req — add to top
+            // New req - add to top
             const idx = g.items.length;
             const ri = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
-            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
+            const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
             // Tool calls/outputs: show tool exec (from toolCallsExec or requestToolCalls), outputs matched by ID
             let toolPairsHtml = '';
@@ -722,7 +722,7 @@ function render(groups) {
             }
           }
         }
-        // Update decoded section — concatenate all unique texts chronologically
+        // Update decoded section - concatenate all unique texts chronologically
         {
           let fullText = '';
           const seen = new Set();
@@ -740,11 +740,10 @@ function render(groups) {
             const oldDecodedLabel = det.querySelector('.decoded-prompt');
             const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
             if (fullText.length > oldDecodedText.length) {
-              const maxD = 5000;
-              const txt = fullText.length > maxD ? fullText.slice(0, maxD) + '\n[TRUNCATED]' : fullText;
-              const newSec = '<div class="detail-section"><span class="lbl">\uD83D\uDCAC De\u0161ifrovani odgovor:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
+              const newSec = '<div class="detail-section"><span class="lbl">💬 Dešifrovani odgovor:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
               if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
               else det.insertAdjacentHTML('afterbegin', newSec);
+              const dp = det.querySelector('.decoded-prompt'); if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
             }
           }
         }
@@ -756,17 +755,17 @@ function render(groups) {
     }
     prevEl = el;
   });
-  
+
   // Ukloni grupe koje vise ne postoje
   container.querySelectorAll('.group').forEach(el => {
     if (!existingSet.has(el.dataset.groupKey)) el.remove();
   });
-  
+
   // If no groups, show placeholder
   if (!sorted.length) {
     container.innerHTML = '<div class="empty">No active requests...</div>';
   }
-  
+
   // Restore expand state from DOM
   Object.keys(oldExpanded).forEach(key => {
     const el = container.querySelector(`.group[data-group-key="${CSS.escape(key)}"]`);
@@ -794,11 +793,11 @@ function refresh() {
 const socket = io();
 let socketLastUpdate = 0;
 
-// Polling fallback — ako Socket.IO ne radi, polliraj svake 2s
+// Polling fallback - ako Socket.IO ne radi, polliraj svake 2s
 let lastPollHash = '';
 function pollLogs() {
   fetch('/api/logs').then(r => r.json()).then(data => {
-    // Poredi samo ID + status — ignorisi decodedText/promene duzine
+    // Poredi samo ID + status - ignorisi decodedText/promene duzine
     const hash = JSON.stringify(data.map(l => l.id + ':' + l.status + ':' + (l.durationMs||0)));
     if (hash !== lastPollHash) {
       lastPollHash = hash;
@@ -820,7 +819,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }).catch(() => { logs = []; expandedGroups = {}; rebuildToolCallMap(); refresh(); });
 };
   startGroupsTicker();
-  
+
   socket.on('init', data => { logs = data; rebuildToolCallMap(); refresh(); });
   socket.on('log-update', payload => {
     const i = logs.findIndex(l => l.id === payload.id);
