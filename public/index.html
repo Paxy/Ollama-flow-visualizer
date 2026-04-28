@@ -473,8 +473,7 @@ function buildGroupHtml(g) {
             <div class="summary-row">
               <span class="summary-label">💬 User prompt:</span>
               <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.userPrompt)}</span>
-              ${item.requestSummary.userPrompt.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
-              <pre style="display:none">${escHtml(item.requestSummary.userPrompt)}</pre>
+              ${item.requestSummary.userPrompt.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
             </div>` : ''}
           ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
             <div class="summary-row">
@@ -637,8 +636,7 @@ function render(groups) {
                     <div class="summary-row">
                       <span class="summary-label">💬 User prompt:</span>
                       <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.userPrompt)}</span>
-                      ${item.requestSummary.userPrompt.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
-                      <pre style="display:none">${escHtml(item.requestSummary.userPrompt)}</pre>
+                      ${item.requestSummary.userPrompt.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
                     </div>` : ''}
                   ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
                     <div class="summary-row">
