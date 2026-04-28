@@ -321,8 +321,8 @@ function buildGroups() {
     if (new Date(log.timestamp) > new Date(g.lastTs)) g.lastTs = log.timestamp;
   });
   
-  // Sortiraj: najnoviji zahtev na vrhu (reverse chronological)
-  map.forEach(g => g.items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+  // Sortiraj: od najstarijeg ka najnovijem (chronological)
+  map.forEach(g => g.items.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
   console.log('[BUILD] grupe:', [...map.entries()].map(([k,g]) => ({key:k, lastTs:g.lastTs, firstTs:g.firstTs, cnt:g.items.length})));
   return Object.fromEntries(map);
 }
