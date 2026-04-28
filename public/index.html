@@ -300,8 +300,11 @@ function buildGroups() {
     g.items.push(log);
     if (log.status === 'error' || log.error) g.hasError = true;
     if (log.status === 'streaming' || log.status === 'pending') g.hasActive = true;
-    if (log.decodedText && (!g.decodedText || log.decodedText.length > g.decodedText.length)) {
-      g.decodedText = log.decodedText;
+    if (log.decodedText) {
+      const txt = log.decodedText.trim();
+      if (txt && (!g.decodedText || !g.decodedText.includes(txt))) {
+        g.decodedText = g.decodedText ? g.decodedText + '\n\n---\n\n' + txt : txt;
+      }
     }
     if (log.toolCallsExec && log.toolCallsExec.length) {
       // Append, deduplicate by function name+arguments
@@ -412,10 +415,18 @@ function buildGroupHtml(g) {
 
   // Decoded section — uzmi najduži decodedText ili error iz svih item-a
   let decodedHtml = '';
+  // Collect ALL unique decoded texts chronologically, concatenated
   let bestDecoded = '';
   let groupError = null;
+  const seen = new Set();
   g.items.forEach(item => {
-    if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+    if (item.decodedText) {
+      const txt = item.decodedText.trim();
+      if (txt && !seen.has(txt)) {
+        seen.add(txt);
+        bestDecoded = bestDecoded ? bestDecoded + '\n\n---\n\n' + txt : txt;
+      }
+    }
     if (item.error && !groupError) groupError = item.error;
   });
   if (groupError && !bestDecoded) {
@@ -553,29 +564,36 @@ function render(groups) {
         hdr.querySelector('.dur').textContent = `⏱ ${dur}`;
         hdr.querySelector('.count').textContent = `${g.items.length}x`;
       }
-      // Azuriraj decodedText — uzmi najduži iz svih item-a
+      // Update decodedText — concatenate all unique texts chronologically
       const det = el.querySelector('.g-det');
       if (det) {
-        let bestDecoded = '';
+        let fullText = '';
         let groupError = null;
+        const seen = new Set();
         g.items.forEach(item => {
-          if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+          if (item.decodedText) {
+            const txt = item.decodedText.trim();
+            if (txt && !seen.has(txt)) {
+              seen.add(txt);
+              fullText = fullText ? fullText + '\n\n---\n\n' + txt : txt;
+            }
+          }
           if (item.error && !groupError) groupError = item.error;
         });
         const oldDecodedSec = det.querySelector('.detail-section .lbl');
-        if (groupError && !bestDecoded) {
+        if (groupError && !fullText) {
           const isOllamaError = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(groupError);
           const agent = isOllamaError ? 'Ollama' : 'Agent';
           const errHtml = '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error (' + agent + '):</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a">' + escHtml(groupError) + '</div></div>';
           const oldErrLabel = det.querySelector('.decoded-prompt');
           if (oldErrLabel) oldErrLabel.closest('.detail-section').outerHTML = errHtml;
           else det.insertAdjacentHTML('afterbegin', errHtml);
-        } else if (bestDecoded.length > 0) {
+        } else if (fullText.length > 0) {
           const oldDecodedLabel = det.querySelector('.decoded-prompt');
           const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
-          if (bestDecoded.length > oldDecodedText.length) {
+          if (fullText.length > oldDecodedText.length) {
             const maxD = 5000;
-            const txt = bestDecoded.length > maxD ? bestDecoded.slice(0, maxD) + '\n[TRUNCATED]' : bestDecoded;
+            const txt = fullText.length > maxD ? fullText.slice(0, maxD) + '\n[TRUNCATED]' : fullText;
             const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
             if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
             else det.insertAdjacentHTML('afterbegin', newSec);
@@ -704,19 +722,26 @@ function render(groups) {
             }
           }
         }
-        // Update decoded section
+        // Update decoded section — concatenate all unique texts chronologically
         {
-          let bestDecoded = '';
+          let fullText = '';
+          const seen = new Set();
           g.items.forEach(item => {
-            if (item.decodedText && item.decodedText.length > bestDecoded.length) bestDecoded = item.decodedText;
+            if (item.decodedText) {
+              const txt = item.decodedText.trim();
+              if (txt && !seen.has(txt)) {
+                seen.add(txt);
+                fullText = fullText ? fullText + '\n\n---\n\n' + txt : txt;
+              }
+            }
           });
           const det = el.querySelector('.g-det');
           if (det) {
             const oldDecodedLabel = det.querySelector('.decoded-prompt');
             const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
-            if (bestDecoded.length > oldDecodedText.length) {
+            if (fullText.length > oldDecodedText.length) {
               const maxD = 5000;
-              const txt = bestDecoded.length > maxD ? bestDecoded.slice(0, maxD) + '\n[TRUNCATED]' : bestDecoded;
+              const txt = fullText.length > maxD ? fullText.slice(0, maxD) + '\n[TRUNCATED]' : fullText;
               const newSec = '<div class="detail-section"><span class="lbl">\uD83D\uDCAC De\u0161ifrovani odgovor:</span><div class="decoded-prompt">' + escHtml(txt) + '</div></div>';
               if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
               else det.insertAdjacentHTML('afterbegin', newSec);
