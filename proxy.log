@@ -60113,3 +60113,50 @@ Node.js v24.14.0
 [PROXY] POST /v1/chat/completions → 200 (50699ms) [STREAM]
 [PROXY] POST /v1/chat/completions → 200 (34151ms) [STREAM]
 [PROXY] POST /v1/chat/completions → 200 (57337ms) [STREAM]
+[SHUTDOWN] Received SIGTERM, closing...
+[WEB] Client disconnected: qVWQvHY6AmkT4fZmAAAD
+[SHUTDOWN] Proxy closed
+[SHUTDOWN] Web server closed
+[SHUTDOWN] Forced exit
+[2026-04-28 21:38:54] Starting Ollama Flow Visualizer...
+[CFG] Loaded: /root/.openclaw/workspace/projects/ollama-flow-visualizer/config.json
+╔═══════════════════════════════════════════╗
+║  🦾 Ollama Flow Visualizer v3.0            ║
+╠═══════════════════════════════════════════╣
+║  Proxy:   http://0.0.0.0:11435
+║  Target:  http://172.16.100.5:11434
+║  Monitor: http://0.0.0.0:8080
+╚═══════════════════════════════════════════╝
+[WEB] Dashboard at http://0.0.0.0:8080
+[WEB] Client connected: 3RGnKzLo9GewM2TBAAAB
+[PROXY] POST /v1/chat/completions → 200 (32328ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (82189ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (79867ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (53831ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (30806ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (45777ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (72903ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (72426ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (81822ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (84612ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (76693ms) [STREAM]
+[WEB] Client disconnected: 3RGnKzLo9GewM2TBAAAB
+[WEB] Client connected: 67C3y3_1VWAEt6bDAAAD
+[PROXY] POST /v1/chat/completions → 200 (97862ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (94846ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (209065ms) [STREAM]
+[PROXY] POST /v1/chat/completions → 200 (97341ms) [STREAM]
+[WEB] Client disconnected: 67C3y3_1VWAEt6bDAAAD
+[PROXY ERROR] POST /v1/chat/completions → aborted
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect ECONNREFUSED 172.16.100.5:11434
+[PROXY] ERROR: connect EHOSTUNREACH 172.16.100.5:11434
+[PROXY] ERROR: connect EHOSTUNREACH 172.16.100.5:11434
+[PROXY] ERROR: connect EHOSTUNREACH 172.16.100.5:11434

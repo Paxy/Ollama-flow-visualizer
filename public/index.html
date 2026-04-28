@@ -328,8 +328,15 @@ function buildGroups() {
 }
 
 function groupStatus(g) {
-  if (g.hasError) return 'error';
-  if (g.hasActive) return 'active';
+  if (!g.items.length) return 'complete';
+  // Status is based on the newest (last) req in the group
+  const last = g.items[g.items.length - 1];
+  if (last.status === 'error' || last.error) return 'error';
+  if (last.status === 'streaming' || last.status === 'pending') return 'active';
+  // Fallback: check if any item is still active
+  for (const item of g.items) {
+    if (item.status === 'streaming' || item.status === 'pending') return 'active';
+  }
   return 'complete';
 }
 
@@ -394,9 +401,9 @@ function buildGroupHtml(g) {
   const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
   let stLbl;
   if (st === 'error') {
-    let firstError = '';
-    g.items.forEach(item => { if (item.error && !firstError) firstError = item.error; });
-    const isOllamaErr = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(firstError);
+    // Use only the latest item's error for the group status label
+    const latestErr = g.items[g.items.length - 1].error || '';
+    const isOllamaErr = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(latestErr);
     stLbl = isOllamaErr ? '⚠ Ollama' : '⚠ Interrupted';
   } else {
     stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
@@ -551,9 +558,9 @@ function render(groups) {
         const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
         let stLbl;
         if (st === 'error') {
-          let fe = '';
-          g.items.forEach(function(i){if(i.error&&!fe)fe=i.error;});
-          stLbl = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(fe) ? '⚠ Ollama' : '⚠ Interrupted';
+          // Use only the latest item's error for the group status label
+          const latestErr = g.items[g.items.length - 1].error || '';
+          stLbl = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(latestErr) ? '⚠ Ollama' : '⚠ Interrupted';
         } else {
           stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
         }
@@ -695,9 +702,9 @@ function render(groups) {
             const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
             let stLbl;
             if (st === 'error') {
-              let fe = '';
-              g.items.forEach(function(i){if(i.error&&!fe)fe=i.error;});
-              stLbl = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(fe) ? '⚠ Ollama' : '⚠ Interrupted';
+              // Use only the latest item's error for the group status label
+              const latestErr = g.items[g.items.length - 1].error || '';
+              stLbl = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(latestErr) ? '⚠ Ollama' : '⚠ Interrupted';
             } else {
               stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
             }
