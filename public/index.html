@@ -496,7 +496,7 @@ function buildGroupHtml(g) {
 
 function render(groups) {
   const container = document.getElementById('groups');
-  const sorted = Object.values(groups).sort((a, b) => new Date(a.lastTs) - new Date(b.lastTs));
+  const sorted = Object.values(groups).sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs));
 
   // Sacuvaj expand state iz DOM-a pre bilo kakvih promena
   const oldExpanded = {};
