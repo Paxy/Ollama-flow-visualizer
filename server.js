@@ -138,15 +138,11 @@ const proxyServer = http.createServer((req, res) => {
   req.on('end', () => {
     const requestBodyBuffer = Buffer.concat(bodyChunks);
 
-    // Log request body as string
+    // Log request body as string — truncate AFTER extraction for display only
     let requestBodyStr = null;
     try {
       requestBodyStr = requestBodyBuffer.toString('utf8');
-      logEntry.requestBody = requestBodyStr.length > REQ_BODY_MAX
-        ? requestBodyStr.slice(0, REQ_BODY_MAX) + '...(truncated)'
-        : requestBodyStr;
     } catch (e) {
-      logEntry.requestBody = '(binary/raw data)';
       requestBodyStr = null;
     }
 
@@ -160,9 +156,19 @@ const proxyServer = http.createServer((req, res) => {
         // Helper: clean metadata from prompt text
         const cleanPrompt = function(text) {
           if (!text) return '';
-          // Remove Sender (untrusted metadata) blocks
-          let cleaned = text.replace(/Sender \(untrusted metadata\):[\s\S]*?```(?:json)?[\s\S]*?```\n*/g, '');
-          // Remove timestamp markers [Sat ...] or [Day ...]
+          // Step 1: Strip entire "OpenClaw runtime context" block + Sender metadata
+          // The context block is injected by OpenClaw AFTER the user's message
+          let cleaned = text.replace(/\n*OpenClaw runtime context[\s\S]*?```(?:json)?[\s\S]*?```\s*/g, '');
+          // Step 2: If no triple-backtick block was found, strip runtime context text greedily
+          cleaned = cleaned.replace(/\n*OpenClaw runtime context for the immediately preceding user message\.[\s\S]*$/, '');
+          // Step 3: Fallback — if everything got stripped, try targeted context removal
+          if (!cleaned.trim() && text.trim()) {
+            const fallback = text.replace(/\n*OpenClaw runtime context for the immediately preceding user message\.[\s\S]+?```(?:json)?[\s\S]*?```\s*/g, '').trim();
+            cleaned = fallback;
+          }
+          // Step 4: Remove orphan Sender metadata blocks
+          cleaned = cleaned.replace(/Sender \(untrusted metadata\):[\s\S]*?```(?:json)?[\s\S]*?```\n*/g, '');
+          // Step 5: Remove timestamp markers [Day Date UTC+TZ]
           cleaned = cleaned.replace(/\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2}[^\]]*\]\s*/g, '');
           return cleaned.trim();
         };
@@ -190,9 +196,15 @@ const proxyServer = http.createServer((req, res) => {
           };
           const systemMsgs = body.messages.filter(m => m.role === 'system')
             .map(m => extractText(m.content)).filter(Boolean).join('\n\n');
-          const lastUserMsg = [...body.messages].reverse().find(m => m.role === 'user');
+          // Find the last non-empty user message (skip runtime-context-only messages)
+          const userMsgs = body.messages.filter(m => m.role === 'user');
+          let userPromptText = null;
+          for (let i = userMsgs.length - 1; i >= 0; i--) {
+            const t = extractText(userMsgs[i].content);
+            if (t) { userPromptText = t; break; }
+          }
           logEntry.systemContext = systemMsgs && systemMsgs.length > 0 ? systemMsgs : null;
-          logEntry.userPrompt = lastUserMsg ? extractText(lastUserMsg.content) : null;
+          logEntry.userPrompt = userPromptText;
           // Extract tools from the request if present
           logEntry.tools = body.tools && Array.isArray(body.tools) && body.tools.length > 0 ? body.tools.map(t => t.function?.name || t.type || JSON.stringify(t).slice(0,80)) : null;
           
@@ -228,9 +240,10 @@ const proxyServer = http.createServer((req, res) => {
             model: body.model || 'unknown',
             messageCount: body.messages.length,
             stream: body.stream === true,
+            userPrompt: logEntry.userPrompt ? logEntry.userPrompt.slice(0, 500) : null,
             lastMessage: {
               role: lastMsg?.role || 'unknown',
-              content: extractSummaryText(lastMsg?.content || '').slice(0, 500)
+              content: cleanPrompt(extractSummaryText(lastMsg?.content || '')).slice(0, 500)
             },
             hasTools: !!(body.tools && body.tools.length > 0),
             toolChoice: body.tool_choice || 'auto'
@@ -239,41 +252,21 @@ const proxyServer = http.createServer((req, res) => {
         // Ollama /api/generate format: { prompt: "..." , system: "..." }
         else if (body.prompt !== undefined) {
           logEntry.systemContext = body.system || null;
-          logEntry.userPrompt = body.prompt || null;
-        }
-        // OpenAI /v1/chat/completions format: { messages: [{role, content}, ...] }
-        else if (body.messages && Array.isArray(body.messages) && body.messages.length > 0) {
-          const extractText = function(content) {
-            let text = '';
-            if (typeof content === 'string') {
-              text = content;
-            } else if (Array.isArray(content)) {
-              text = content.map(p => {
-                if (typeof p === 'string') return p;
-                if (p.text) return p.text;
-                if (p.content) return p.content;
-                return '';
-              }).filter(Boolean).join(' ');
-            } else if (typeof content === 'object' && content !== null) {
-              const textFields = ['text', 'content', 'message'];
-              for (const key of textFields) {
-                if (content[key] && typeof content[key] === 'string') { text = content[key]; break; }
-              }
-            }
-            return cleanPrompt(text);
-          };
-          const systemMsgs = body.messages.filter(m => m.role === 'system')
-            .map(m => extractText(m.content)).filter(Boolean).join('\n\n');
-          const lastUserMsg = [...body.messages].reverse().find(m => m.role === 'user');
-          logEntry.systemContext = systemMsgs && systemMsgs.length > 0 ? systemMsgs : null;
-          logEntry.userPrompt = lastUserMsg ? extractText(lastUserMsg.content) : null;
+          logEntry.userPrompt = cleanPrompt(body.prompt || '');
         }
       } catch (e) {
-        // Not valid JSON, skip extraction
+        console.error(`[EXTRACT] Failed to parse request body: ${e.message}`);
       }
     }
 
-    
+    // Truncate body for display/API (extraction already used full body above)
+    if (requestBodyStr) {
+      logEntry.requestBody = requestBodyStr.length > REQ_BODY_MAX
+        ? requestBodyStr.slice(0, REQ_BODY_MAX) + '...(truncated)'
+        : requestBodyStr;
+    } else {
+      logEntry.requestBody = '(binary/raw data)';
+    }
 
     // Emit pending log immediately, before sending to Ollama
     logEntry.requestSize = requestBodyBuffer.length;
@@ -568,18 +561,76 @@ const proxyServer = http.createServer((req, res) => {
 });
 
 // ============================================================
-// Startup
+// Graceful shutdown
 // ============================================================
-proxyServer.listen(PROXY_PORT, PROXY_HOST, () => {
-  console.log('╔═══════════════════════════════════════════╗');
-  console.log('║  🦾 Ollama Flow Visualizer v3.0            ║');
-  console.log('╠═══════════════════════════════════════════╣');
-  console.log(`║  Proxy:   http://${PROXY_HOST}:${PROXY_PORT}`);
-  console.log(`║  Target:  http://${OLLAMA_HOST}:${OLLAMA_PORT}`);
-  console.log(`║  Monitor: http://0.0.0.0:${WEB_PORT}`);
-  console.log('╚═══════════════════════════════════════════╝');
+function shutdown(signal) {
+  console.log(`[SHUTDOWN] Received ${signal}, closing...`);
+  io.close();
+  webServer.close(() => console.log('[SHUTDOWN] Web server closed'));
+  if (proxyStarted) proxyServer.close(() => console.log('[SHUTDOWN] Proxy closed'));
+  setTimeout(() => { console.log('[SHUTDOWN] Forced exit'); process.exit(0); }, 5000);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// ============================================================
+// Startup (with graceful EADDRINUSE / error handling)
+// ============================================================
+
+let proxyStarted = false;
+
+function tryListenProxy(host, port, retries, cb) {
+  proxyServer.listen(port, host)
+    .on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[FATAL] Proxy port ${port} already in use. Cannot start proxy.`);
+        console.error(`[FATAL] Kill the old process or use a different port.`);
+        console.error(`[FATAL] Dashboard-only mode: web UI at :${WEB_PORT} still works.`);
+        proxyStarted = false;
+        cb(false);
+      } else {
+        console.error(`[FATAL] Proxy listen error: ${err.message}`);
+        process.exit(1);
+      }
+    })
+    .on('listening', () => {
+      proxyStarted = true;
+      cb(true);
+    });
+}
+
+tryListenProxy(PROXY_HOST, PROXY_PORT, 0, (ok) => {
+  if (ok) {
+    console.log('╔═══════════════════════════════════════════╗');
+    console.log('║  🦾 Ollama Flow Visualizer v3.0            ║');
+    console.log('╠═══════════════════════════════════════════╣');
+    console.log(`║  Proxy:   http://${PROXY_HOST}:${PROXY_PORT}`);
+    console.log(`║  Target:  http://${OLLAMA_HOST}:${OLLAMA_PORT}`);
+    console.log(`║  Monitor: http://0.0.0.0:${WEB_PORT}`);
+    console.log('╚═══════════════════════════════════════════╝');
+  } else {
+    console.log('╔═══════════════════════════════════════════╗');
+    console.log('║  🦾 Ollama Flow Visualizer v3.0            ║');
+    console.log('║  ⚠ Proxy OFFLINE (port in use)            ║');
+    console.log(`║  Monitor: http://0.0.0.0:${WEB_PORT}`);
+    console.log('╚═══════════════════════════════════════════╝');
+  }
 });
 
-webServer.listen(WEB_PORT, '0.0.0.0', () => {
-  console.log(`[WEB] Dashboard at http://0.0.0.0:${WEB_PORT}`);
-});
+function tryListenWeb(host, port) {
+  webServer.listen(port, host)
+    .on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[FATAL] Dashboard port ${port} already in use. Cannot start.`);
+        process.exit(1);
+      } else {
+        console.error(`[FATAL] Dashboard listen error: ${err.message}`);
+        process.exit(1);
+      }
+    })
+    .on('listening', () => {
+      console.log(`[WEB] Dashboard at http://0.0.0.0:${port}`);
+    });
+}
+
+tryListenWeb('0.0.0.0', WEB_PORT);

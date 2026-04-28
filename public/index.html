@@ -458,12 +458,17 @@ function buildGroupHtml(g) {
           ${item.requestSummary.messageCount != null ? `<div class="summary-row"><span class="summary-label">Messages:</span><span class="summary-content">${item.requestSummary.messageCount}</span></div>` : ''}
           ${item.requestSummary.stream != null ? `<div class="summary-row"><span class="summary-label">Streaming:</span><span class="summary-content">${item.requestSummary.stream ? '✓' : '✗'}</span></div>` : ''}
           ${item.requestSummary.lastMessage ? `<div class="summary-row"><span class="summary-label">Last message:</span><span class="summary-content">${escHtml(item.requestSummary.lastMessage.role || '')}</span></div>` : ''}
+          ${item.requestSummary.userPrompt ? `
+            <div class="summary-row">
+              <span class="summary-label">💬 User prompt:</span>
+              <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.userPrompt)}</span>
+              ${item.requestSummary.userPrompt.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
+              <pre style="display:none">${escHtml(item.requestSummary.userPrompt)}</pre>
+            </div>` : ''}
           ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
             <div class="summary-row">
-              <span class="summary-label">Content:</span>
-              <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.lastMessage.content)}</span>
-              ${item.requestSummary.lastMessage.content.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
-              <pre style="display:none">${escHtml(item.requestSummary.lastMessage.content)}</pre>
+              <span class="summary-label">Last msg content:</span>
+              <span class="summary-content" style="color:#6a6e75;font-size:.7rem;">${escHtml(item.requestSummary.lastMessage.content.slice(0, 300))}${item.requestSummary.lastMessage.content.length > 300 ? '…' : ''}</span>
             </div>` : ''}
           ${item.requestSummary.hasTools != null ? `<div class="summary-row"><span class="summary-label">Tools:</span><span class="summary-content">${item.requestSummary.hasTools ? '✓ (' + (item.requestSummary.toolChoice || 'auto') + ')' : '✗'}</span></div>` : ''}
         </div>
@@ -609,12 +614,17 @@ function render(groups) {
                   ${item.requestSummary.messageCount != null ? `<div class="summary-row"><span class="summary-label">Messages:</span><span class="summary-content">${item.requestSummary.messageCount}</span></div>` : ''}
                   ${item.requestSummary.stream != null ? `<div class="summary-row"><span class="summary-label">Streaming:</span><span class="summary-content">${item.requestSummary.stream ? '✓' : '✗'}</span></div>` : ''}
                   ${item.requestSummary.lastMessage ? `<div class="summary-row"><span class="summary-label">Last message:</span><span class="summary-content">${escHtml(item.requestSummary.lastMessage.role || '')}</span></div>` : ''}
+                  ${item.requestSummary.userPrompt ? `
+                    <div class="summary-row">
+                      <span class="summary-label">💬 User prompt:</span>
+                      <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.userPrompt)}</span>
+                      ${item.requestSummary.userPrompt.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
+                      <pre style="display:none">${escHtml(item.requestSummary.userPrompt)}</pre>
+                    </div>` : ''}
                   ${item.requestSummary.lastMessage && item.requestSummary.lastMessage.content ? `
                     <div class="summary-row">
-                      <span class="summary-label">Content:</span>
-                      <span class="summary-content truncate" id="rq-summary-${escHtml(item.id)}">${escHtml(item.requestSummary.lastMessage.content)}</span>
-                      ${item.requestSummary.lastMessage.content.length > 200 ? `<span class="expand-btn" onclick="this.previousElementSibling.classList.toggle('truncate');this.previousElementSibling.nextElementSibling.style.display=this.previousElementSibling.nextElementSibling.style.display==='block'?'none':'block';this.textContent=this.textContent==='show more'?'show less':'show more'">show more</span>` : ''}
-                      <pre style="display:none">${escHtml(item.requestSummary.lastMessage.content)}</pre>
+                      <span class="summary-label">Last msg content:</span>
+                      <span class="summary-content" style="color:#6a6e75;font-size:.7rem;">${escHtml(item.requestSummary.lastMessage.content.slice(0, 300))}${item.requestSummary.lastMessage.content.length > 300 ? '…' : ''}</span>
                     </div>` : ''}
                   ${item.requestSummary.hasTools != null ? `<div class="summary-row"><span class="summary-label">Tools:</span><span class="summary-content">${item.requestSummary.hasTools ? '✓ (' + (item.requestSummary.toolChoice || 'auto') + ')' : '✗'}</span></div>` : ''}
                 </div>

@@ -13,9 +13,9 @@
   },
   "limits": {
     "maxLogs": 500,
-    "requestBodyMaxChars": 5000,
-    "toolOutputMaxChars": 2000,
-    "decodedTextMaxChars": 5000,
+    "requestBodyMaxChars": 50000,
+    "toolOutputMaxChars": 4000,
+    "decodedTextMaxChars": 50000,
     "streamTimeoutMs": 600000
   }
 }
