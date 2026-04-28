@@ -8,11 +8,7 @@ Intercepts all requests to Ollama, logs them in real-time, and displays them in 
 
 ![Ollama Flow Visualizer dashboard](docs/screenshots/dashboard.png)
 
-*Full dashboard view — grouped requests, tool calls, decoded responses, and error details.*
-
-![Dashboard viewport](docs/screenshots/dashboard-viewport.png)
-
-*Alternative viewport showing grouped flows with status indicators and live streaming durations.*
+*Grouped requests, tool calls, decoded responses, status indicators, and live streaming durations.*
 
 ## Features
 
