@@ -33,6 +33,8 @@
     .g-hdr .count{font-size:.7rem;color:#6272a4;flex-shrink:0}
     .g-hdr .dur{font-size:.75rem;color:#bd93f9;flex-shrink:0;font-weight:600}
     .g-hdr .tools-badge{font-size:.65rem;color:#ffa657;background:#2a1e10;padding:1px 6px;border-radius:3px;border:1px solid #ffa65733;flex-shrink:0}
+    .g-hdr .expand-link{color:#5a9eff;cursor:pointer;font-size:.65rem;text-decoration:underline;flex-shrink:0;white-space:nowrap;margin-left:-8px}
+    .g-hdr .expand-link:hover{color:#7ab8ff}
     .g-det{display:none;padding:0 24px 16px;background:#0d1117;border-top:1px solid #1a1e24}
     .g-det.open{display:block}
     .g-header-info{display:flex;gap:16px;flex-wrap:wrap;padding:12px 0 8px;font-size:.72rem;color:#6a6e75;border-bottom:1px solid #1a1e24;margin-bottom:10px}
@@ -221,6 +223,13 @@ function stopBtnHtml(id, status) {
     return '<span class="r-stop show" data-id="' + escHtml(id) + '" onclick="event.stopPropagation();stopRequest(\'' + escHtml(id) + '\')" title="Stop request">&#x1F6D1;</span>';
   }
   return '<span class="r-stop"></span>';
+}
+
+function expandGroupPrompt(el) {
+  const full = el.dataset.full;
+  const promptSpan = el.parentElement.querySelector('.prompt');
+  if (promptSpan) promptSpan.textContent = full;
+  el.style.display = 'none';
 }
 
 function toggleReq(el) {
@@ -432,7 +441,8 @@ function buildGroupHtml(g) {
   } else {
     stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
   }
-  const display = g.prompt;
+  const truncated = g.prompt.length > 1000;
+  const display = truncated ? g.prompt.slice(0, 1000) + '…' : g.prompt;
   // Collect all tools from items that have them (each item provides its own requestToolCalls)
   const allToolCalls = [];
   const seenTool = new Set();
@@ -521,7 +531,7 @@ function buildGroupHtml(g) {
 
   var tsIcon = '&#128197;'; // calendar
   var durIcon = '&#9201;'; // stopwatch
-  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span><span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
 function render(groups) {
