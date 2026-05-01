@@ -554,7 +554,7 @@ function buildGroupHtml(g) {
 
   var tsIcon = '&#128197;'; // calendar
   var durIcon = '&#9201;'; // stopwatch
-  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.lastTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
 function render(groups, onlyKey) {
