@@ -63,9 +63,9 @@
     .req-hdr .r-st.pend{color:#ff5555}
     .req-hdr .r-preview{color:#6272a4;font-size:.7rem;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
     .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;padding-left:12px}
-    .req-hdr .r-stop{flex-shrink:0;margin-left:auto;cursor:pointer;padding:0 4px;font-size:.65rem;color:#ff5555;background:transparent;border:none;font-family:inherit;display:none;line-height:1}
-    .req-hdr .r-stop.show{display:inline}
-    .req-hdr .r-stop:hover{color:#ff7777;background:#2a1a1a;border-radius:3px}
+    .req-hdr .r-stop{flex-shrink:0;margin-left:auto;cursor:pointer;padding:2px 6px;font-size:.9rem;color:#ff3333;background:transparent;border:1px solid transparent;font-family:inherit;display:none;line-height:1;border-radius:4px;transition:.15s}
+    .req-hdr .r-stop.show{display:inline-block}
+    .req-hdr .r-stop:hover{color:#ff5555;background:#2a0a0a;border-color:#ff333366}
     .req-body{display:none;margin-top:8px;background:#060a10;border:1px solid #1a1e24;border-radius:6px;padding:12px;overflow-x:auto;font-size:.72rem;line-height:1.5;max-height:60vh;overflow-y:auto}
     .req-body.visible{display:block}
     .lbl{color:#bd93f9;font-weight:600;margin-bottom:4px;display:inline-block}
@@ -218,7 +218,7 @@ function stopRequest(id) {
 
 function stopBtnHtml(id, status) {
   if (status === 'pending' || status === 'streaming') {
-    return '<span class="r-stop show" data-id="' + escHtml(id) + '" onclick="event.stopPropagation();stopRequest(\'' + escHtml(id) + '\')" title="Stop request">✕</span>';
+    return '<span class="r-stop show" data-id="' + escHtml(id) + '" onclick="event.stopPropagation();stopRequest(\'' + escHtml(id) + '\')" title="Stop request">&#x1F6D1;</span>';
   }
   return '<span class="r-stop"></span>';
 }
