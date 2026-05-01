@@ -427,6 +427,29 @@ function startGroupsTicker() {
   }, 2000);
 }
 
+function updateDecodedSection(det, g) {
+  let fullText = '';
+  const seen = new Set();
+  g.items.forEach(item => {
+    if (item.decodedText) {
+      const txt = item.decodedText.trim();
+      if (txt && !seen.has(txt)) {
+        seen.add(txt);
+        fullText = fullText ? fullText + '\n\n---\n\n' + txt : txt;
+      }
+    }
+  });
+  if (!fullText) return;
+  const oldDecodedLabel = det.querySelector('.decoded-prompt');
+  const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
+  if (fullText.length > oldDecodedText.length) {
+    const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
+    if (oldDecodedLabel) oldDecodedLabel.closest('.detail-section').outerHTML = newSec;
+    else det.insertAdjacentHTML('afterbegin', newSec);
+    const dp = det.querySelector('.decoded-prompt'); if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
+  }
+}
+
 function buildGroupHtml(g) {
   const st = groupStatus(g);
   const dur = fmtDur(g.items.reduce((s, i) => s + (i.durationMs || 0), 0));
@@ -870,13 +893,47 @@ document.addEventListener('DOMContentLoaded', () => {
   socket.on('init', data => { logs = data; rebuildToolCallMap(); refresh(); });
   socket.on('log-update', payload => {
     const i = logs.findIndex(l => l.id === payload.id);
+    const statusChanged = i < 0 || logs[i].status !== payload.status;
     if (i >= 0) logs[i] = payload;
     else { logs.unshift(payload); if (logs.length > 200) logs.pop(); }
     socketLastUpdate = Date.now();
-    rebuildToolCallMap();
-    const g = buildGroups();
-    updateSummary(g);
-    render(g);
+    if (!statusChanged && (payload.status === 'done' || payload.status === 'error')) {
+      // Completed request sa istim statusom — samo osvezi preview, duration i decodedText
+      document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(payload.id)}"]`).forEach(el => {
+        const hdr = el.querySelector('.req-hdr');
+        if (!hdr) return;
+        const pv = payload.decodedText ? payload.decodedText.replace(/\n/g,' ').slice(0,500) + (payload.decodedText.length>500?'...':'') : (payload.error ? '❌ ' + payload.error.slice(0,200) : '');
+        const pr = hdr.querySelector('.r-preview');
+        if (pr) pr.textContent = pv;
+        const dur = hdr.querySelector('.r-dur');
+        if (dur) dur.textContent = fmtDur(payload.durationMs);
+      });
+      // Update decoded section i group header
+      const g = buildGroups();
+      const match = Object.values(g).find(grp => grp.items.some(it => it.id === payload.id));
+      if (match) {
+        const groupEl = document.querySelector(`.group[data-group-key="${CSS.escape(match.key)}"]`);
+        if (groupEl) {
+          const det = groupEl.querySelector('.g-det');
+          if (det) updateDecodedSection(det, match);
+          // Update group header (status, duration, count)
+          const ghdr = groupEl.querySelector('.g-hdr');
+          if (ghdr) {
+            const st = groupStatus(match);
+            const dur = fmtDur(match.items.reduce((s, i) => s + (i.durationMs || 0), 0));
+            ghdr.querySelector('.status').textContent = st === 'error' ? '⚠ Interrupted' : '✓ Completed';
+            ghdr.querySelector('.dur').textContent = '\u23f1 ' + dur;
+            ghdr.querySelector('.count').textContent = match.items.length + 'x';
+          }
+        }
+      }
+    } else {
+      // Status se promenio (pending->streaming->done) ili nov req — full render
+      rebuildToolCallMap();
+      const g = buildGroups();
+      updateSummary(g);
+      render(g);
+    }
   });
   socket.on('live-duration', data => {
     const i = logs.findIndex(l => l.id === data.id);
