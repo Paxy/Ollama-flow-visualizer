@@ -35,6 +35,7 @@ const REQ_BODY_MAX = config.limits?.requestBodyMaxChars || 5000;
 const TOOL_OUT_MAX = config.limits?.toolOutputMaxChars || 2000;
 
 const requestLogs = [];
+const activeRequests = {};  // requestId -> { proxyReq, res, watchdogTimer, logEntry }
 
 function addLog(entry) {
   const existingIndex = requestLogs.findIndex(l => l.id === entry.id);
@@ -77,6 +78,33 @@ webApp.delete('/api/logs', (req, res) => {
   console.log('[WEB] Logs cleared');
 });
 
+// Stop/cancel an active request
+webApp.post('/api/stop/:id', (req, res) => {
+  const requestId = req.params.id;
+  const active = activeRequests[requestId];
+  if (!active) {
+    return res.status(404).json({ error: 'Request not found or already completed', id: requestId });
+  }
+  const { proxyReq, logEntry } = active;
+  console.log(`[STOP] Cancelling request ${requestId} (${logEntry.path})`);
+  // Destroy proxy request to Ollama
+  try { proxyReq.destroy(); } catch(e) {}
+  // Mark as stopped so downstream error handlers don't overwrite
+  logEntry._stopped = true;
+  // Update log entry
+  logEntry.durationMs = Number(process.hrtime.bigint() - logEntry._startTime) / 1_000_000;
+  logEntry.error = 'Cancelled by user';
+  logEntry.status = 'error';
+  logEntry.responseBody = 'CANCELLED';
+  logEntry.responseSize = 0;
+  addLog(logEntry);
+  // Close client response
+  try { if (!active.res.writableEnded) active.res.end(); } catch(e) {}
+  // Clean up before destroying proxyReq so handlers skip
+  delete activeRequests[requestId];
+  res.json({ ok: true, id: requestId, status: 'cancelled' });
+});
+
 io.on('connection', (socket) => {
   console.log(`[WEB] Client connected: ${socket.id}`);
   webClients.push(socket);
@@ -98,6 +126,7 @@ const proxyServer = http.createServer((req, res) => {
   // Log entry
   const logEntry = {
     id: requestId,
+    _startTime: startTime,
     timestamp: new Date(timestamp).toISOString(),
     method: req.method,
     path: req.url,
@@ -305,6 +334,7 @@ const proxyServer = http.createServer((req, res) => {
     }, (proxyRes) => {
       logEntry.responseStatus = proxyRes.statusCode;
       logEntry.responseHeaders = proxyRes.headers;
+      activeRequests[requestId] = { proxyReq, res, logEntry };
       
       if (isStreaming) {
         // === STREAMING (pure passthrough) ===
@@ -369,10 +399,13 @@ const proxyServer = http.createServer((req, res) => {
       console.log(`[PROXY] ${req.method} ${req.url} → TIMEOUT (${logEntry.durationMs.toFixed(0)}ms) [STREAM TIMEOUT]`);
       try { proxyRes.destroy(); } catch(e) {}
       try { if (!res.writableEnded) res.end(); } catch(e) {}
+      delete activeRequests[requestId];
     }, STREAM_TIMEOUT_MS);
         
         proxyRes.on('end', () => {
+          delete activeRequests[requestId];
           clearTimeout(watchdogTimer);
+          if (logEntry._stopped) { stopTick(); return; }
           const endTime = process.hrtime.bigint();
           logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
           
@@ -423,15 +456,18 @@ const proxyServer = http.createServer((req, res) => {
         });
 
         proxyRes.on('error', (err) => {
+          delete activeRequests[requestId];
           clearTimeout(watchdogTimer);
-          logEntry.error = err.message;
-          logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-          logEntry.status = 'error';
-          stopTick();
-          addLog(logEntry);
-          console.log(`[PROXY ERROR] ${req.method} ${req.url} → ${err.message}`);
-          if (!res.headersSent) res.writeHead(504);
-          res.end();
+          if (!logEntry._stopped) {
+            logEntry.error = err.message;
+            logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+            logEntry.status = 'error';
+            stopTick();
+            addLog(logEntry);
+            console.log(`[PROXY ERROR] ${req.method} ${req.url} → ${err.message}`);
+            if (!res.headersSent) res.writeHead(504);
+            res.end();
+          }
         });
 
       } else {
@@ -444,6 +480,7 @@ const proxyServer = http.createServer((req, res) => {
         });
 
         proxyRes.on('end', () => {
+          delete activeRequests[requestId];
           const endTime = process.hrtime.bigint();
           logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
 
@@ -515,11 +552,14 @@ const proxyServer = http.createServer((req, res) => {
     });
 
     proxyReq.on('error', (err) => {
-      logEntry.error = err.message;
-      logEntry.status = 'error';
-      stopTick();
-      addLog(logEntry);
-      console.error(`[PROXY] ERROR: ${err.message}`);
+      delete activeRequests[requestId];
+      if (!logEntry._stopped) {
+        logEntry.error = err.message;
+        logEntry.status = 'error';
+        stopTick();
+        addLog(logEntry);
+        console.error(`[PROXY] ERROR: ${err.message}`);
+      }
 
       if (!res.headersSent) {
         res.statusCode = 502;
@@ -530,6 +570,7 @@ const proxyServer = http.createServer((req, res) => {
 
     // Timeout protection
     proxyReq.on('timeout', () => {
+      delete activeRequests[requestId];
       const endTime = process.hrtime.bigint();
       logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
       logEntry.error = 'Timeout after 120s';
@@ -551,6 +592,7 @@ const proxyServer = http.createServer((req, res) => {
         console.log(`[PROXY] Client disconnected: ${req.method} ${req.url} (id: ${requestId})`);
         proxyReq.destroy();
       }
+      delete activeRequests[requestId];
     });
 
     proxyReq.write(requestBodyBuffer);

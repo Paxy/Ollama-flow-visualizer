@@ -62,7 +62,10 @@
     .req-hdr .r-st.stream{color:#f1fa8c}
     .req-hdr .r-st.pend{color:#ff5555}
     .req-hdr .r-preview{color:#6272a4;font-size:.7rem;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;margin-left:auto;padding-left:12px}
+    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;padding-left:12px}
+    .req-hdr .r-stop{flex-shrink:0;margin-left:auto;cursor:pointer;padding:0 4px;font-size:.65rem;color:#ff5555;background:transparent;border:none;font-family:inherit;display:none;line-height:1}
+    .req-hdr .r-stop.show{display:inline}
+    .req-hdr .r-stop:hover{color:#ff7777;background:#2a1a1a;border-radius:3px}
     .req-body{display:none;margin-top:8px;background:#060a10;border:1px solid #1a1e24;border-radius:6px;padding:12px;overflow-x:auto;font-size:.72rem;line-height:1.5;max-height:60vh;overflow-y:auto}
     .req-body.visible{display:block}
     .lbl{color:#bd93f9;font-weight:600;margin-bottom:4px;display:inline-block}
@@ -204,6 +207,22 @@ function toggleGroup(el) {
     if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
   }
 }
+function stopRequest(id) {
+  const btn = document.querySelector(`.r-stop[data-id="${CSS.escape(id)}"]`);
+  if (btn) { btn.textContent = '⋯'; btn.style.color = '#6272a4'; btn.style.cursor = 'default'; btn.onclick = null; }
+  fetch('/api/stop/' + encodeURIComponent(id), { method: 'POST' })
+    .then(r => r.json())
+    .then(d => { if (d.ok) console.log('Stopped:', id); })
+    .catch(() => {});
+}
+
+function stopBtnHtml(id, status) {
+  if (status === 'pending' || status === 'streaming') {
+    return '<span class="r-stop show" data-id="' + escHtml(id) + '" onclick="event.stopPropagation();stopRequest(\'' + escHtml(id) + '\')" title="Stop request">✕</span>';
+  }
+  return '<span class="r-stop"></span>';
+}
+
 function toggleReq(el) {
   const p = el.closest('.g-det');
   if (p) {
@@ -496,7 +515,7 @@ function buildGroupHtml(g) {
         </div>
       </div>` : '';
     rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
-      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}<span class="r-st-text" style="${rLblCss}">${rLbl.split(' ').slice(1).join(' ')}</span></span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
+      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}<span class="r-st-text" style="${rLblCss}">${rLbl.split(' ').slice(1).join(' ')}</span></span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span>${stopBtnHtml(item.id, item.status)}</div>` +
       `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}${toolPairsHtml}</div></div>`;
   });
 
@@ -659,7 +678,7 @@ function render(groups) {
                 </div>
               </div>` : '';
             // Replace entire innerHTML (header + body)
-            reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span>${stopBtnHtml(item.id, item.status)}</div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             if (wasVisible) {
               const nb = reqEl.querySelector('.req-body');
               if (nb) nb.classList.add('visible');
@@ -686,7 +705,7 @@ function render(groups) {
             const nr = document.createElement('div');
             nr.className = 'req-row';
             nr.dataset.reqId = item.id;
-            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span>${stopBtnHtml(item.id, item.status)}</div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             // Append new req-row at the bottom (oldest at top, newest at bottom)
             det.appendChild(nr);
           }
