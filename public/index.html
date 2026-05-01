@@ -719,7 +719,7 @@ function render(groups, onlyKey) {
             // Skip rebuild ako je req vec done/error (ne diraj DOM)
             const existingSt = reqEl.querySelector('.r-st')?.className || '';
             const isFinal = existingSt.includes(' ok ') || existingSt.includes(' err ');
-            if (isFinal && (item.status === 'done' || item.status === 'error')) {
+            if (isFinal && (item.status === 'completed' || item.status === 'error')) {
               // Samo osvezi duration
               const durEl = reqEl.querySelector('.r-dur');
               if (durEl) durEl.textContent = fmtDur(item.durationMs);
@@ -914,7 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (i >= 0) logs[i] = payload;
     else { logs.unshift(payload); if (logs.length > 200) logs.pop(); }
     socketLastUpdate = Date.now();
-    if (!statusChanged && (payload.status === 'done' || payload.status === 'error')) {
+    if (!statusChanged && (payload.status === 'completed' || payload.status === 'error')) {
       // Completed request sa istim statusom — samo osvezi preview, duration i decodedText
       document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(payload.id)}"]`).forEach(el => {
         const hdr = el.querySelector('.req-hdr');
