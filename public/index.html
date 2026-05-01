@@ -64,7 +64,7 @@
     .req-hdr .r-st.stream{color:#f1fa8c}
     .req-hdr .r-st.pend{color:#ff5555}
     .req-hdr .r-preview{color:#6272a4;font-size:.7rem;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;padding-left:12px}
+    .req-hdr .r-dur{color:#bd93f9;flex-shrink:0;margin-left:auto;padding-left:8px}
     .req-hdr .r-stop{flex-shrink:0;margin-left:auto;cursor:pointer;padding:2px 6px;font-size:.9rem;color:#ff3333;background:transparent;border:1px solid transparent;font-family:inherit;display:none;line-height:1;border-radius:4px;transition:.15s}
     .req-hdr .r-stop.show{display:inline-block}
     .req-hdr .r-stop:hover{color:#ff5555;background:#2a0a0a;border-color:#ff333366}
@@ -554,7 +554,7 @@ function buildGroupHtml(g) {
 
   var tsIcon = '&#128197;'; // calendar
   var durIcon = '&#9201;'; // stopwatch
-  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.lastTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
 function render(groups, onlyKey) {
