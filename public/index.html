@@ -198,6 +198,11 @@ function toggleGroup(el) {
   });
   el.classList.toggle('expanded');
   el.nextElementSibling.classList.toggle('open');
+  // Kad se grupa otvori, skroluj decoded response na dno
+  if (el.classList.contains('expanded')) {
+    const dp = el.nextElementSibling.querySelector('.decoded-prompt');
+    if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
+  }
 }
 function toggleReq(el) {
   const p = el.closest('.g-det');
