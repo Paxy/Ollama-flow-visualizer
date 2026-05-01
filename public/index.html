@@ -716,11 +716,20 @@ function render(groups, onlyKey) {
                   ${item.requestSummary.hasTools != null ? `<div class="summary-row"><span class="summary-label">Tools:</span><span class="summary-content">${item.requestSummary.hasTools ? '✓ (' + (item.requestSummary.toolChoice || 'auto') + ')' : '✗'}</span></div>` : ''}
                 </div>
               </div>` : '';
-            // Replace entire innerHTML (header + body)
-            reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
-            if (wasVisible) {
-              const nb = reqEl.querySelector('.req-body');
-              if (nb) nb.classList.add('visible');
+            // Skip rebuild ako je req vec done/error (ne diraj DOM)
+            const existingSt = reqEl.querySelector('.r-st')?.className || '';
+            const isFinal = existingSt.includes(' ok ') || existingSt.includes(' err ');
+            if (isFinal && (item.status === 'done' || item.status === 'error')) {
+              // Samo osvezi duration
+              const durEl = reqEl.querySelector('.r-dur');
+              if (durEl) durEl.textContent = fmtDur(item.durationMs);
+            } else {
+              // Replace entire innerHTML (header + body)
+              reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+              if (wasVisible) {
+                const nb = reqEl.querySelector('.req-body');
+                if (nb) nb.classList.add('visible');
+              }
             }
           } else {
             // New req - add to bottom
