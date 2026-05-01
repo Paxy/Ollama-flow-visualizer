@@ -557,28 +557,33 @@ function buildGroupHtml(g) {
   return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
-function render(groups) {
+function render(groups, onlyKey) {
   const container = document.getElementById('groups');
-  const sorted = Object.values(groups).sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs));
+  const allVals = Object.values(groups);
+  const sorted = onlyKey ? allVals.filter(g => g.key === onlyKey) : allVals.sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs));
 
-  // Sacuvaj expand state iz DOM-a pre bilo kakvih promena
+  // Sacuvaj expand state iz DOM-a pre bilo kakvih promena (samo pri full render)
   const oldExpanded = {};
-  container.querySelectorAll('.group').forEach(el => {
-    const key = el.dataset.groupKey;
-    if (key && el.querySelector('.g-hdr.expanded')) oldExpanded[key] = true;
-  });
+  if (!onlyKey) {
+    container.querySelectorAll('.group').forEach(el => {
+      const key = el.dataset.groupKey;
+      if (key && el.querySelector('.g-hdr.expanded')) oldExpanded[key] = true;
+    });
+  }
 
   // Hash-based diffing: poredi samo status + duration, ne data koja se menjaju u streamu
-  const newHash = sorted.map(g => g.key + ':' + g.items.map(i => i.status + '|' + (i.durationMs||0)).join(',')).join(';');
-  if (container.dataset.lastHash === newHash) return;
-  container.dataset.lastHash = newHash;
+  if (!onlyKey) {
+    const newHash = sorted.map(g => g.key + ':' + g.items.map(i => i.status + '|' + (i.durationMs||0)).join(',')).join(';');
+    if (container.dataset.lastHash === newHash) return;
+    container.dataset.lastHash = newHash;
+  }
 
   // Ukloni placeholder ako postoji
   const placeholderEl = container.querySelector('.empty');
   if (placeholderEl) placeholderEl.remove();
 
   // Azuriraj postojece grupe i dodaj nove u sortiranom redosledu
-  const existingSet = new Set(sorted.map(g => g.key));
+  const existingSet = onlyKey ? new Set() : new Set(sorted.map(g => g.key));
   let prevEl = null;
   sorted.forEach((g) => {
     let el = container.querySelector(`.group[data-group-key="${CSS.escape(g.key)}"]`);
@@ -826,28 +831,30 @@ function render(groups) {
     prevEl = el;
   });
 
-  // Ukloni grupe koje vise ne postoje
-  container.querySelectorAll('.group').forEach(el => {
-    if (!existingSet.has(el.dataset.groupKey)) el.remove();
-  });
+  // Ukloni grupe koje vise ne postoje (samo pri full render)
+  if (!onlyKey) {
+    container.querySelectorAll('.group').forEach(el => {
+      if (!existingSet.has(el.dataset.groupKey)) el.remove();
+    });
 
-  // If no groups, show placeholder
-  if (!sorted.length) {
-    container.innerHTML = '<div class="empty">No active requests...</div>';
-  }
-
-  // Restore expand state from DOM
-  Object.keys(oldExpanded).forEach(key => {
-    const el = container.querySelector(`.group[data-group-key="${CSS.escape(key)}"]`);
-    if (el) {
-      const hdr = el.querySelector('.g-hdr');
-      const det = el.querySelector('.g-det');
-      if (hdr && det) {
-        hdr.classList.add('expanded');
-        det.classList.add('open');
-      }
+    // If no groups, show placeholder
+    if (!sorted.length) {
+      container.innerHTML = '<div class="empty">No active requests...</div>';
     }
-  });
+
+    // Restore expand state from DOM
+    Object.keys(oldExpanded).forEach(key => {
+      const el = container.querySelector(`.group[data-group-key="${CSS.escape(key)}"]`);
+      if (el) {
+        const hdr = el.querySelector('.g-hdr');
+        const det = el.querySelector('.g-det');
+        if (hdr && det) {
+          hdr.classList.add('expanded');
+          det.classList.add('open');
+        }
+      }
+    });
+  }
 }
 
 function refresh() {
@@ -928,11 +935,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     } else {
-      // Status se promenio (pending->streaming->done) ili nov req — full render
+      // Status se promenio (pending->streaming->done) ili nov req — samo tu grupu rebuilduj
       rebuildToolCallMap();
       const g = buildGroups();
       updateSummary(g);
-      render(g);
+      const matchKey = payload.id ? Object.values(g).find(grp => grp.items.some(it => it.id === payload.id))?.key : null;
+      render(g, matchKey);
     }
   });
   socket.on('live-duration', data => {
