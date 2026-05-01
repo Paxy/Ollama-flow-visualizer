@@ -944,8 +944,47 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       }
+    } else if (i >= 0 && logs[i].status === 'pending' && payload.status === 'streaming') {
+      // pending->streaming — samo osvezi req header, bez render-a (ne diraj done req-ove)
+      document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(payload.id)}"]`).forEach(el => {
+        const hdr = el.querySelector('.req-hdr');
+        if (!hdr) return;
+        const ri = '🌊';
+        const rc = 'stream';
+        const pv = payload.decodedText ? payload.decodedText.replace(/\n/g,' ').slice(0,500) + (payload.decodedText.length>500?'...':'') : '';
+        hdr.querySelector('.r-st').className = 'r-st ' + rc;
+        hdr.querySelector('.r-st').innerHTML = ri + '<span class="r-st-text" style="font-size:.65rem;color:#6a6e75;margin-left:4px;font-weight:400">Waiting for response</span>';
+        const pr = hdr.querySelector('.r-preview');
+        if (pr) pr.textContent = pv;
+        const dur = hdr.querySelector('.r-dur');
+        if (dur) dur.textContent = fmtDur(payload.durationMs);
+        // Update stop button
+        const oldStop = hdr.querySelector('.r-stop');
+        if (oldStop) {
+          const parent = oldStop.parentNode;
+          const newStopHtml = stopBtnHtml(payload.id, payload.status);
+          if (parent) oldStop.outerHTML = newStopHtml;
+        }
+      });
+      // Update group header i decoded section
+      const g = buildGroups();
+      const match = Object.values(g).find(grp => grp.items.some(it => it.id === payload.id));
+      if (match) {
+        const groupEl = document.querySelector(`.group[data-group-key="${CSS.escape(match.key)}"]`);
+        if (groupEl) {
+          const hdr = groupEl.querySelector('.g-hdr');
+          if (hdr) {
+            const st = groupStatus(match);
+            hdr.querySelector('.status').textContent = '⏳ Active';
+            hdr.querySelector('.status').className = 'status active';
+            hdr.querySelector('.dur').textContent = '\u23f1 ' + fmtDur(match.items.reduce((s, i) => s + (i.durationMs || 0), 0));
+          }
+          const det = groupEl.querySelector('.g-det');
+          if (det) updateDecodedSection(det, match);
+        }
+      }
     } else {
-      // Status se promenio (pending->streaming->done) ili nov req — samo tu grupu rebuilduj
+      // Status se promenio (streaming->done/error, pending->error) ili nov req — samo tu grupu
       rebuildToolCallMap();
       const g = buildGroups();
       updateSummary(g);
