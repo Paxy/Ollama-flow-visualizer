@@ -604,14 +604,16 @@ function render(groups, onlyKey) {
       }
     } else {
       // Existing group - update content
-      // Prvo proveri da li je na pravom mestu
-      if (prevEl) {
-        const expectedNext = prevEl.nextSibling;
-        if (expectedNext !== el) {
-          container.insertBefore(el, expectedNext && expectedNext.classList.contains('group') ? expectedNext : (prevEl.nextSibling || null));
+      if (!onlyKey) {
+        // Prvo proveri da li je na pravom mestu (samo pri full render)
+        if (prevEl) {
+          const expectedNext = prevEl.nextSibling;
+          if (expectedNext !== el) {
+            container.insertBefore(el, expectedNext && expectedNext.classList.contains('group') ? expectedNext : (prevEl.nextSibling || null));
+          }
+        } else if (container.firstChild && container.firstChild !== el) {
+          container.insertBefore(el, container.firstChild);
         }
-      } else if (container.firstChild && container.firstChild !== el) {
-        container.insertBefore(el, container.firstChild);
       }
 
       // Azuriraj header info
