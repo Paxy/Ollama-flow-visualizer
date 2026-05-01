@@ -23,7 +23,7 @@
     .g-hdr:hover{background:#151921}
     .g-hdr .arrow{color:#6272a4;font-size:.7rem;transition:transform .2s;flex-shrink:0}
     .g-hdr.expanded .arrow{transform:rotate(90deg)}
-    .g-hdr .prompt{color:#8b949e;font-size:.82rem;flex:1;min-width:200px;max-width:100%;line-height:1.4;word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .g-hdr .prompt{color:#8b949e;font-size:.82rem;flex:1;min-width:200px;max-width:100%;line-height:1.4;word-break:break-word;white-space:pre-wrap}
     .g-hdr .ctx{border-left:2px solid #2a2e35;padding-left:10px;color:#6272a4;font-size:.72rem;flex-shrink:0;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .g-hdr .ts{color:#6a6e75;font-size:.7rem;flex-shrink:0}
     .g-hdr .status{font-size:.75rem;padding:2px 8px;border-radius:3px;flex-shrink:0;font-weight:600}
@@ -408,7 +408,7 @@ function buildGroupHtml(g) {
   } else {
     stLbl = st === 'active' ? '⏳ Active' : '✓ Completed';
   }
-  const display = g.prompt.length > 600 ? g.prompt.slice(0, 600) + '...' : g.prompt;
+  const display = g.prompt;
   // Collect all tools from items that have them (each item provides its own requestToolCalls)
   const allToolCalls = [];
   const seenTool = new Set();
