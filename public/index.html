@@ -558,10 +558,14 @@ function buildGroupHtml(g) {
   return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
 }
 
+let _sortedOnce = false;
+
 function render(groups, onlyKey) {
   const container = document.getElementById('groups');
   const allVals = Object.values(groups);
-  const sorted = onlyKey ? allVals.filter(g => g.key === onlyKey) : allVals.sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs));
+  // Sort only na prvom renderu (ucitavanje strane)
+  const sorted = onlyKey ? allVals.filter(g => g.key === onlyKey) :
+    (!_sortedOnce ? allVals.sort((a, b) => new Date(b.lastTs) - new Date(a.lastTs)) : allVals);
 
   // Sacuvaj expand state iz DOM-a pre bilo kakvih promena (samo pri full render)
   const oldExpanded = {};
@@ -867,6 +871,7 @@ function render(groups, onlyKey) {
       }
     });
   }
+    _sortedOnce = true;
 }
 
 function refresh() {
