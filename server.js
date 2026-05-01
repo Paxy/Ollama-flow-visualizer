@@ -92,7 +92,7 @@ webApp.post('/api/stop/:id', (req, res) => {
   // Mark as stopped so downstream error handlers don't overwrite
   logEntry._stopped = true;
   // Update log entry
-  logEntry.durationMs = Number(process.hrtime.bigint() - logEntry._startTime) / 1_000_000;
+  logEntry.durationMs = Date.now() - new Date(logEntry.timestamp).getTime();
   logEntry.error = 'Cancelled by user';
   logEntry.status = 'error';
   logEntry.responseBody = 'CANCELLED';
@@ -126,7 +126,7 @@ const proxyServer = http.createServer((req, res) => {
   // Log entry
   const logEntry = {
     id: requestId,
-    _startTime: startTime,
+    _startTime: Number(startTime),
     timestamp: new Date(timestamp).toISOString(),
     method: req.method,
     path: req.url,
