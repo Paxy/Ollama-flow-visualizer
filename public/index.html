@@ -548,7 +548,7 @@ function buildGroupHtml(g) {
         </div>
       </div>` : '';
     rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
-      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}<span class="r-st-text" style="${rLblCss}">${rLbl.split(' ').slice(1).join(' ')}</span></span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span>${stopBtnHtml(item.id, item.status)}</div>` +
+      `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}<span class="r-st-text" style="${rLblCss}">${rLbl.split(' ').slice(1).join(' ')}</span></span><span class="r-preview">${escHtml(previewTxtB)}</span>${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></div>` +
       `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}${toolPairsHtml}</div></div>`;
   });
 
@@ -716,7 +716,7 @@ function render(groups, onlyKey) {
                 </div>
               </div>` : '';
             // Replace entire innerHTML (header + body)
-            reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span>${stopBtnHtml(item.id, item.status)}</div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span>${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             if (wasVisible) {
               const nb = reqEl.querySelector('.req-body');
               if (nb) nb.classList.add('visible');
@@ -743,7 +743,7 @@ function render(groups, onlyKey) {
             const nr = document.createElement('div');
             nr.className = 'req-row';
             nr.dataset.reqId = item.id;
-            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-dur">${fmtDur(item.durationMs)}</span>${stopBtnHtml(item.id, item.status)}</div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span>${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
             // Append new req-row at the bottom (oldest at top, newest at bottom)
             det.appendChild(nr);
           }
