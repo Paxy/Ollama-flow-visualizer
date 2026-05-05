@@ -402,6 +402,37 @@ function startGroupsTicker() {
   }, 2000);
 }
 
+function updateGroupToolsSection(det, g) {
+  const allExecs = [];
+  const allOutputs = [];
+  const seenExecIds = new Set();
+  const seenOutputIds = new Set();
+  g.items.forEach(item => {
+    (item.toolCallsExec || []).forEach(tc => {
+      const key = tc.id || (tc.function?.name + '|' + JSON.stringify(tc.function?.arguments));
+      if (!seenExecIds.has(key)) { seenExecIds.add(key); allExecs.push(tc); }
+    });
+    (item.toolOutputs || []).forEach(to => {
+      const key = to.toolCallId || to.toolName || to.content;
+      if (!seenOutputIds.has(key)) { seenOutputIds.add(key); allOutputs.push(to); }
+    });
+  });
+  if (allExecs.length === 0 && allOutputs.length === 0) return;
+  const newHtml = '<span class="lbl">🔧 Tool Calls &amp; Outputs:</span>' + renderToolSection(allExecs, allOutputs);
+  const existing = det.querySelector('.group-tools-section');
+  if (existing) {
+    existing.innerHTML = newHtml;
+  } else {
+    // Insert after decoded section, before first req-row
+    const afterEl = det.querySelector('.detail-section') || det.firstChild;
+    const div = document.createElement('div');
+    div.className = 'detail-section group-tools-section';
+    div.innerHTML = newHtml;
+    if (afterEl) afterEl.insertAdjacentElement('afterend', div);
+    else det.insertBefore(div, det.firstChild);
+  }
+}
+
 function updateDecodedSection(det, g) {
   let fullText = '';
   const seen = new Set();
@@ -435,7 +466,6 @@ function buildGroupHtml(g) {
   const stCls = st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete');
   let stLbl;
   if (st === 'error') {
-    // Use only the latest item's error for the group status label
     const latestErr = g.items[g.items.length - 1].error || '';
     const isOllamaErr = /timeout|timed out|ECONNREFUSED|ECONNRESET|5\d\d|Ollama|ollama/i.test(latestErr);
     stLbl = isOllamaErr ? '⚠ Ollama' : '⚠ Interrupted';
@@ -444,20 +474,16 @@ function buildGroupHtml(g) {
   }
   const truncated = g.prompt.length > 1000;
   const display = truncated ? g.prompt.slice(0, 1000) + '…' : g.prompt;
-  // Collect all tools from items that have them (each item provides its own requestToolCalls)
-  const allToolCalls = [];
-  const seenTool = new Set();
-  g.items.forEach(item => {
-    (item.requestToolCalls || []).forEach(tc => {
-      const name = tc.function?.name || tc.name;
-      if (name && !seenTool.has(name)) { seenTool.add(name); allToolCalls.push(tc); }
-    });
-  });
-  const hasTools = allToolCalls.length > 0;
 
-  // Decoded section - uzmi najduži decodedText ili error iz svih item-a
+  // Broj tool call-ova za badge u headeru
+  const allToolNames = new Set();
+  g.items.forEach(item => {
+    (item.toolCallsExec || []).forEach(tc => { if (tc.function?.name) allToolNames.add(tc.function.name); });
+  });
+  const hasTools = allToolNames.size > 0;
+
+  // Decoded section
   let decodedHtml = '';
-  // Collect ALL unique decoded texts chronologically, concatenated
   let bestDecoded = '';
   let groupError = null;
   const seen = new Set();
@@ -479,9 +505,33 @@ function buildGroupHtml(g) {
     decodedHtml = `<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">${escHtml(bestDecoded)}</div></div>`;
   }
 
-  // Tool display per request - each req shows its own tool calls + outputs
+  // 🔧 Zajednička tool sekcija grupe — svi toolCallsExec + outputi iz svih req-ova
+  let groupToolsHtml = '';
+  const allExecs = [];
+  const allOutputs = [];
+  const seenExecIds = new Set();
+  const seenOutputIds = new Set();
+  g.items.forEach(item => {
+    (item.toolCallsExec || []).forEach(tc => {
+      const key = tc.id || (tc.function?.name + '|' + JSON.stringify(tc.function?.arguments));
+      if (!seenExecIds.has(key)) {
+        seenExecIds.add(key);
+        allExecs.push(tc);
+      }
+    });
+    (item.toolOutputs || []).forEach(to => {
+      const key = to.toolCallId || to.toolName || to.content;
+      if (!seenOutputIds.has(key)) {
+        seenOutputIds.add(key);
+        allOutputs.push(to);
+      }
+    });
+  });
+  if (allExecs.length > 0 || allOutputs.length > 0) {
+    groupToolsHtml = '<div class="detail-section group-tools-section"><span class="lbl">🔧 Tool Calls &amp; Outputs:</span>' + renderToolSection(allExecs, allOutputs) + '</div>';
+  }
 
-  // Req rows
+  // Req rows — svaki req prikazuje SAMO svoj responseBody, bez tuđih tool output-a
   let rowsHtml = '';
   g.items.forEach((item, idx) => {
     const rIcon = item.status === 'error' ? '❌' : (item.status === 'pending' ? '⏳' : (item.status === 'streaming' ? '🌊' : '✅'));
@@ -489,13 +539,10 @@ function buildGroupHtml(g) {
     const rCls = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
     const rLblCss = item.status === 'pending' || item.status === 'streaming' ? 'font-size:.65rem;color:#6a6e75;margin-left:4px;font-weight:400' : '';
     const rErr = item.error ? escHtml(item.error.slice(0,300)) : '';
-    
     const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
     
-    // Tool calls/outputs: prikaži i toolCallsExec i toolOutputs (ne samo jedno ili drugo)
-    let toolPairsHtml = renderToolSection(item.toolCallsExec || item.requestToolCalls, item.toolOutputs);
+    // Samo response body za ovaj req (tool outputi su u grupnoj sekciji)
     let rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
-    // Request summary - clean display instead of raw JSON dump
     let rq = item.requestSummary ? `
       <div class="detail-section">
         <div class="req-summary">
@@ -520,12 +567,12 @@ function buildGroupHtml(g) {
       </div>` : '';
     rowsHtml +=`<div class="req-row" data-req-id="${escHtml(item.id)}">` +
       `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rCls}">${rIcon}<span class="r-st-text" style="${rLblCss}">${rLbl.split(' ').slice(1).join(' ')}</span></span><span class="r-preview">${escHtml(previewTxtB)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div>` +
-      `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}${toolPairsHtml}</div></div>`;
+      `<div class="req-body">${rErr ? `<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">${rErr}</div></div>` : ''}${rb}${rq}</div></div>`;
   });
 
-  var tsIcon = '&#128197;'; // calendar
-  var durIcon = '&#9201;'; // stopwatch
-  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${g.toolCallsExec.length}</span>` : ''}</div><div class="g-det">${decodedHtml}${rowsHtml}</div>`;
+  var tsIcon = '&#128197;';
+  var durIcon = '&#9201;';
+  return `<div class="g-hdr" onclick="toggleGroup(this)"><span class="arrow">&#9654;</span><span class="ts">${tsIcon} ${fmtTs(g.firstTs)}</span><span class="prompt">${escHtml(display)}</span>${truncated ? `<span class="expand-link" onclick="event.stopPropagation();expandGroupPrompt(this)" data-full="${escHtml(g.prompt)}">show full</span>` : ''}<span class="status ${stCls}">${stLbl}</span><span class="dur">${durIcon} ${dur}</span><span class="count">${cnt}x</span>${hasTools ? `<span class="tools-badge">&#x1F527; ${allToolNames.size}</span>` : ''}</div><div class="g-det">${decodedHtml}${groupToolsHtml}${rowsHtml}</div>`;
 }
 
 let _sortedOnce = false;
@@ -674,8 +721,6 @@ function render(groups, onlyKey) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            // Tool calls/outputs: unificirani render (povezuje call + output po toolCallId)
-            let toolPairsHtml = renderToolSection(item.toolCallsExec || item.requestToolCalls, item.toolOutputs);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             // Request summary - clean display instead of raw JSON dump
             const rq = item.requestSummary ? `
@@ -714,7 +759,7 @@ function render(groups, onlyKey) {
               }
             } else {
               // Replace entire innerHTML (header + body)
-              reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+              reqEl.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div><div class="req-body">${rErr}${rb}${rq}</div>`;
               if (wasVisible) {
                 const nb = reqEl.querySelector('.req-body');
                 if (nb) nb.classList.add('visible');
@@ -728,14 +773,12 @@ function render(groups, onlyKey) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            // Tool calls/outputs: unificirani render (povezuje call + output po toolCallId)
-            let toolPairsHtml = renderToolSection(item.toolCallsExec || item.requestToolCalls, item.toolOutputs);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             const rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
             const nr = document.createElement('div');
             nr.className = 'req-row';
             nr.dataset.reqId = item.id;
-            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div><div class="req-body">${rErr}${rb}${rq}${toolPairsHtml}</div>`;
+            nr.innerHTML = `<div class="req-hdr" onclick="toggleReq(this)"><span class="r-num">${idx + 1}</span><span class="r-ts">${fmtTs(item.timestamp)}</span><span class="r-st ${rc}">${ri}</span><span class="r-preview">${escHtml(pv)}</span><span class="r-right">${stopBtnHtml(item.id, item.status)}<span class="r-dur">${fmtDur(item.durationMs)}</span></span></div><div class="req-body">${rErr}${rb}${rq}</div>`;
             // Append new req-row at the bottom (oldest at top, newest at bottom)
             det.appendChild(nr);
           }
@@ -920,7 +963,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const groupEl = document.querySelector(`.group[data-group-key="${CSS.escape(match.key)}"]`);
         if (groupEl) {
           const det = groupEl.querySelector('.g-det');
-          if (det) updateDecodedSection(det, match);
+          if (det) { updateDecodedSection(det, match); updateGroupToolsSection(det, match); }
           // Update group header (status, duration, count)
           const ghdr = groupEl.querySelector('.g-hdr');
           if (ghdr) {
@@ -969,7 +1012,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hdr.querySelector('.dur').textContent = '\u23f1 ' + fmtDur(match.items.reduce((s, i) => s + (i.durationMs || 0), 0));
           }
           const det = groupEl.querySelector('.g-det');
-          if (det) updateDecodedSection(det, match);
+          if (det) { updateDecodedSection(det, match); updateGroupToolsSection(det, match); }
         }
       }
     } else {
