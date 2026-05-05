@@ -9,16 +9,26 @@ Tag: v1.3
 ### ⭐ New Features
 - **Native Ollama API thinking/reasoning extraction**: Automatically extracts `thinking` tokens from Ollama-native `/api/chat` streaming chunks (field `message.thinking`) and `reasoning_content` from OpenAI-compatible models. Response body now shows only the decoded thinking/reasoning text, never raw JSON metadata.
 - **Multimodal support**: The proxy transparently passes through image requests when using Ollama native API (`"input": ["text", "image"]` in model config)
+- **Dual tool view**: Group-level collapsible tool panel shows ALL tools and outputs from the entire conversation context. Each request tab shows only its own tool calls and outputs — clear separation between shared context and individual request activity.
+- **Collapsible group tool section**: Click the 🔧 header to collapse/expand the shared tool calls panel (▼/▶ toggle with count badge, preserved across updates)
+- **tool_name–based output matching**: Tool outputs and calls are matched by `toolCallId`, `tool_name`, or position — critical for Ollama native API which uses `tool_name` instead of `tool_call_id`
 
 ### 🛠️ Bug Fixes
-- **Raw JSON in thinking responses**: Fixed issue where streaming models (Gemma 4, Qwen 3.5 with thinking) would display raw JSON chunks in the response body instead of the decoded thinking text. The proxy now correctly extracts all `message.thinking` and `delta.thinking` fields across streaming and non-streaming responses.
+- **Raw JSON in thinking responses**: Fixed issue where streaming models (Gemma 4, Qwen 3.5 with thinking) would display raw JSON chunks instead of decoded thinking text
+- **Tool calls not displayed**: Fixed Ollama native `tool_calls` extraction (object arguments, `function.index`, `tc.id` capture)
+- **Tool outputs not displayed**: OpenClaw's Ollama plugin sends `tool_name` not `tool_call_id` — proxy now handles both formats with proper fallback matching
+- **Context flooding**: Limited tool output extraction to last 5 entries per request (prevents showing entire conversation history in every request)
+- **Connection errors (socket hang up, aborted)**: Cleaned up `transfer-encoding`/`content-length` header conflicts; added `agent: false` for fresh per-request connections to Ollama
+- **Dashboard redraws on completed requests**: Fixed broken `isFinal` check that caused every request to get full DOM replacement on every render
+- **Polling fallback causing fake redraws**: `socketLastUpdate` now properly updated on all socket events; polling interval increased to 30s
+- **Forced scroll disruptions**: Replaced `outerHTML` with `textContent` in decoded section updates; removed forced `requestAnimationFrame(scroll)` calls
 
 ### 📝 Documentation
-- README updated for Ollama native API configuration (`api: "ollama"`), with production config examples
-- Added dual-provider setup example (proxy + direct fallback)
+- README updated with dual tool view, collapsible sections, connection resilience
+- Production config examples with dual-provider fallback setup
 
 ### Stats
-- 2 new features, 1 bug fix, 1 doc commit
+- 5 new features, 8 bug fixes, 2 doc commits
 
 ---
 

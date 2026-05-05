@@ -13,14 +13,17 @@ Intercepts all requests to Ollama, logs them in real-time, and displays them in 
 ## Features
 
 - **Transparent proxy** — sits between OpenClaw (or any Ollama/OpenAI-compatible client) and Ollama. No client-side changes needed. Supports both native `/api/chat` and `/v1/chat/completions` endpoints.
-- **Live dashboard** — Socket.IO-powered real-time UI at `http://<host>:8080`
+- **Live dashboard** — Socket.IO-powered real-time UI at `http://<host>:8080` with minimal DOM updates — no unnecessary redraws
 - **Smart grouping** — groups requests by user prompt (same prompt = same group on the dashboard)
 - **Thinking/reasoning extraction** — automatically extracts and displays `thinking` tokens from Ollama-native streaming chunks (Gemma 4, Qwen 3.5, etc.) and `reasoning_content` from OpenAI-compatible models. No raw JSON metadata in the response view.
 - **Native Ollama API support** — full support for Ollama's native `/api/chat` protocol including multimodal (text + image) requests, thinking tokens, and tool calls
-- **Tool call matching & output lookup** — tool calls (`df`, `cat`, `exec`...) and their outputs are automatically matched by `toolCallId`, even when the call and its output arrive in separate requests within the same group
+- **Dual tool view** — group-level tool panel shows ALL tool calls and outputs from the entire conversation context (collapsible), while each request tab shows only its own tool calls and outputs
+- **Collapsible tool section** — click to collapse/expand the shared tool calls panel (▼/▶ toggle with count badge)
+- **Tool call matching & output lookup** — tool calls (`exec`, `write`, `read`...) and their outputs are automatically matched by `toolCallId`, `toolName`, or position, even when the call and its output arrive in separate requests within the same group
 - **Streaming support** — real-time duration updates for streaming responses
 - **Error source identification** — automatically detects whether an error originated from Ollama (timeout, connection refused, 5xx) or the Agent (interrupted, tool failure)
 - **Total control** — clear logs, expand request/response bodies, inspect error details, see tool execution traces
+- **Connection resilience** — clean per-request connections to Ollama (no keep-alive pool race conditions), proper header forwarding
 
 ## Installation
 
@@ -242,10 +245,12 @@ Open `http://<proxy-host>:8080` in any browser.
 
 - **Groups** — requests are grouped by user prompt (click to expand)
 - **Status indicators** — ✓ Completed / ⏳ Active / ⚠ Interrupted / ❌ Error
-- **Tool calls** — each tool name with its arguments and output shown inline
+- **Decoded response** — concatenated thinking/reasoning text across all requests in the group
+- **🔧 Tool Calls & Outputs** — collapsible group-level panel showing ALL tools from the entire conversation context, with matched outputs
+- **Request rows** — each request shows its own response body, tool calls, and outputs — clearly separated from shared context
 - **Request/Response bodies** — expandable raw JSON with syntax highlighting
-- **Summary bar** — global counts and data size at the top
-- **Live updates** — durations update in real-time during streaming
+- **Summary bar** — global counts, durations, and data sizes at the top
+- **Live updates** — durations update in real-time during streaming; completed requests are never redrawn
 - **Clear button** — clears all stored logs
 
 ## Architecture
