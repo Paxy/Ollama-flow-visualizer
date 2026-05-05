@@ -219,7 +219,7 @@ function renderToolSection(toolCalls, toolOutputs) {
     toolCalls.forEach(tc => {
       const nm = tc.function?.name || 'unknown';
       let args = '';
-      const fnArgs = tc.function?.arguments || tc.function?.rawArgs;
+      const fnArgs = tc.function?.rawArgs || tc.function?.arguments;
       if (fnArgs) {
         let a = fnArgs;
         if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
@@ -308,7 +308,7 @@ function buildGroups() {
     if (log.toolCallsExec && log.toolCallsExec.length) {
       // Append, deduplicate by function name+arguments
       log.toolCallsExec.forEach(tc => {
-        const tcKey = tc.function?.name + '|' + JSON.stringify(tc.function?.arguments);
+        const tcKey = tc.function?.name + '|' + JSON.stringify(tc.function?.rawArgs || tc.function?.arguments);
         if (!g.toolCallsExec.find(ex => (ex.function?.name + '|' + JSON.stringify(ex.function?.arguments)) === tcKey)) {
           g.toolCallsExec.push({...tc, _groupIndex: g.toolCallsExec.length});
         }
@@ -408,8 +408,8 @@ function updateGroupToolsSection(det, g) {
   const seenExecIds = new Set();
   const seenOutputIds = new Set();
   g.items.forEach(item => {
-    (item.toolCallsExec || []).forEach(tc => {
-      const key = tc.id || (tc.function?.name + '|' + JSON.stringify(tc.function?.arguments));
+    (item.toolCallsExec || item.requestToolCalls || []).forEach(tc => {
+      const key = tc.id || (tc.function?.name + '|' + JSON.stringify(tc.function?.rawArgs || tc.function?.arguments));
       if (!seenExecIds.has(key)) { seenExecIds.add(key); allExecs.push(tc); }
     });
     (item.toolOutputs || []).forEach(to => {
@@ -478,7 +478,7 @@ function buildGroupHtml(g) {
   // Broj tool call-ova za badge u headeru
   const allToolNames = new Set();
   g.items.forEach(item => {
-    (item.toolCallsExec || []).forEach(tc => { if (tc.function?.name) allToolNames.add(tc.function.name); });
+    (item.toolCallsExec || item.requestToolCalls || []).forEach(tc => { if (tc.function?.name) allToolNames.add(tc.function.name); });
   });
   const hasTools = allToolNames.size > 0;
 
@@ -512,8 +512,8 @@ function buildGroupHtml(g) {
   const seenExecIds = new Set();
   const seenOutputIds = new Set();
   g.items.forEach(item => {
-    (item.toolCallsExec || []).forEach(tc => {
-      const key = tc.id || (tc.function?.name + '|' + JSON.stringify(tc.function?.arguments));
+    (item.toolCallsExec || item.requestToolCalls || []).forEach(tc => {
+      const key = tc.id || (tc.function?.name + '|' + JSON.stringify(tc.function?.rawArgs || tc.function?.arguments));
       if (!seenExecIds.has(key)) {
         seenExecIds.add(key);
         allExecs.push(tc);
@@ -542,7 +542,8 @@ function buildGroupHtml(g) {
     const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
     
     // Samo response body za ovaj req + njegovi tool callovi/outputi
-    let reqToolHtml = renderToolSection(item.toolCallsExec, item.toolOutputs);
+    const reqTools = (item.toolCallsExec && item.toolCallsExec.length > 0) ? item.toolCallsExec : item.requestToolCalls;
+    let reqToolHtml = renderToolSection(reqTools, item.toolOutputs);
     let rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
     let rq = item.requestSummary ? `
       <div class="detail-section">
@@ -722,7 +723,8 @@ function render(groups, onlyKey) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            const reqToolHtml = renderToolSection(item.toolCallsExec, item.toolOutputs);
+            const reqTools = (item.toolCallsExec && item.toolCallsExec.length > 0) ? item.toolCallsExec : item.requestToolCalls;
+            const reqToolHtml = renderToolSection(reqTools, item.toolOutputs);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             // Request summary - clean display instead of raw JSON dump
             const rq = item.requestSummary ? `
@@ -775,7 +777,8 @@ function render(groups, onlyKey) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            const reqToolHtml = renderToolSection(item.toolCallsExec, item.toolOutputs);
+            const reqTools = (item.toolCallsExec && item.toolCallsExec.length > 0) ? item.toolCallsExec : item.requestToolCalls;
+            const reqToolHtml = renderToolSection(reqTools, item.toolOutputs);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             const rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
             const nr = document.createElement('div');
