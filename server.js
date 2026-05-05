@@ -488,22 +488,19 @@ const proxyServer = http.createServer((req, res) => {
         proxyRes.on('error', (err) => {
           delete activeRequests[requestId];
           clearTimeout(watchdogTimer);
-          // Ako je klijent već diskonektovao, ne loguj grešku — nije bug
-          if (res.writableEnded) {
+          // Ako je klijent diskonektovao, ne loguj kao grešku
+          if (logEntry._clientGone || logEntry._stopped) {
             stopTick();
-            proxyReq.destroy();
             return;
           }
-          if (!logEntry._stopped) {
-            logEntry.error = err.message;
-            logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-            logEntry.status = 'error';
-            stopTick();
-            addLog(logEntry);
-            console.log(`[PROXY ERROR] ${req.method} ${req.url} → ${err.message}`);
-            if (!res.headersSent) res.writeHead(504);
-            res.end();
-          }
+          logEntry.error = err.message;
+          logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+          logEntry.status = 'error';
+          stopTick();
+          addLog(logEntry);
+          console.log(`[PROXY ERROR] ${req.method} ${req.url} → ${err.message}`);
+          if (!res.headersSent) res.writeHead(504);
+          res.end();
         });
 
       } else {
@@ -592,13 +589,13 @@ const proxyServer = http.createServer((req, res) => {
 
     proxyReq.on('error', (err) => {
       delete activeRequests[requestId];
-      if (!logEntry._stopped) {
-        logEntry.error = err.message;
-        logEntry.status = 'error';
-        stopTick();
-        addLog(logEntry);
-        console.error(`[PROXY] ERROR: ${err.message}`);
-      }
+      // Ako je klijent već diskonektovao, ne loguj
+      if (logEntry._clientGone || logEntry._stopped) return;
+      logEntry.error = err.message;
+      logEntry.status = 'error';
+      stopTick();
+      addLog(logEntry);
+      console.error(`[PROXY] ERROR: ${err.message}`);
 
       if (!res.headersSent) {
         res.statusCode = 502;
@@ -628,6 +625,7 @@ const proxyServer = http.createServer((req, res) => {
     // Memory leak protection: if client disconnects, destroy proxy request
     res.on('close', () => {
       if (!res.writableEnded) {
+        logEntry._clientGone = true;
         proxyReq.destroy();
       }
       delete activeRequests[requestId];
