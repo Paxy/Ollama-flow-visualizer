@@ -42,7 +42,12 @@
     .decoded-prompt{background:#060a10;border:1px solid #1a1e24;border-radius:6px;padding:12px;font-size:.78rem;color:#c5c8c6;line-height:1.55;max-height:300px;overflow-y:auto;margin-bottom:12px;white-space:pre-wrap;word-break:break-word}
     .decoded-prompt::-webkit-scrollbar{width:4px}
     .decoded-prompt::-webkit-scrollbar-thumb{background:#2a2e35;border-radius:2px}
-    .tool-section{border:1px solid #1a1e24;border-radius:6px;margin-bottom:10px;background:#0d1117}
+    .group-tools-content{max-height:600px;overflow-y:auto}
+    .group-tools-content::-webkit-scrollbar{width:4px}
+    .group-tools-content::-webkit-scrollbar-thumb{background:#2a2e35;border-radius:2px}
+    .group-tools-section.collapsed .group-tools-content{display:none}
+    .group-tools-section .lbl:before{content:'▼ ';font-size:.6rem;color:#6272a4}
+    .group-tools-section.collapsed .lbl:before{content:'▶ '}
     .tool-section-hdr{padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:.75rem;color:#ffa657;font-weight:600;border-bottom:1px solid #1a1e24}
     .tool-section-hdr:hover{background:#151921}
     .tool-section-hdr .arrow{transition:transform .2s;color:#6272a4}
@@ -418,12 +423,14 @@ function updateGroupToolsSection(det, g) {
     });
   });
   if (allExecs.length === 0 && allOutputs.length === 0) return;
-  const newHtml = '<span class="lbl">🔧 Tool Calls &amp; Outputs:</span>' + renderToolSection(allExecs, allOutputs);
+  const cnt = allExecs.length + allOutputs.length;
+  const newHtml = '<span class="lbl" style="cursor:pointer;user-select:none" onclick="this.parentElement.classList.toggle(\'collapsed\')">🔧 Tool Calls &amp; Outputs <span style="font-size:.65rem;color:#6272a4">(' + cnt + ' — click to toggle)</span></span><div class="group-tools-content">' + renderToolSection(allExecs, allOutputs) + '</div>';
   const existing = det.querySelector('.group-tools-section');
   if (existing) {
+    const wasCollapsed = existing.classList.contains('collapsed');
     existing.innerHTML = newHtml;
+    if (wasCollapsed) existing.classList.add('collapsed');
   } else {
-    // Insert after decoded section, before first req-row
     const afterEl = det.querySelector('.detail-section') || det.firstChild;
     const div = document.createElement('div');
     div.className = 'detail-section group-tools-section';
@@ -528,7 +535,7 @@ function buildGroupHtml(g) {
     });
   });
   if (allExecs.length > 0 || allOutputs.length > 0) {
-    groupToolsHtml = '<div class="detail-section group-tools-section"><span class="lbl">🔧 Tool Calls &amp; Outputs:</span>' + renderToolSection(allExecs, allOutputs) + '</div>';
+    groupToolsHtml = '<div class="detail-section group-tools-section"><span class="lbl" style="cursor:pointer;user-select:none" onclick="this.parentElement.classList.toggle(\'collapsed\')">🔧 Tool Calls &amp; Outputs <span style="font-size:.65rem;color:#6272a4">(' + (allExecs.length + allOutputs.length) + ' — click to toggle)</span></span><div class="group-tools-content">' + renderToolSection(allExecs, allOutputs) + '</div></div>';
   }
 
   // Req rows — svaki req prikazuje SAMO svoj responseBody, bez tuđih tool output-a
