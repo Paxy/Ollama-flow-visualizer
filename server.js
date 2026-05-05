@@ -325,9 +325,11 @@ const proxyServer = http.createServer((req, res) => {
                         (bodyStream && (req.url.includes('/v1/') || req.url.includes('/openai/v1/')));
 
     // Create request to Ollama (forward all client headers)
-    // Filter 'connection' header to avoid conflicts with keep-alive pool
+    // Filter connection/transfer-encoding headers to avoid conflicts
     const filteredHeaders = { ...req.headers };
     delete filteredHeaders['connection'];
+    delete filteredHeaders['transfer-encoding'];
+    delete filteredHeaders['content-length']; // koristimo nas content-length od buffer-a
 
     const proxyReq = http.request(TARGET_URL + req.url, {
       method: req.method,
@@ -486,6 +488,12 @@ const proxyServer = http.createServer((req, res) => {
         proxyRes.on('error', (err) => {
           delete activeRequests[requestId];
           clearTimeout(watchdogTimer);
+          // Ako je klijent već diskonektovao, ne loguj grešku — nije bug
+          if (res.writableEnded) {
+            stopTick();
+            proxyReq.destroy();
+            return;
+          }
           if (!logEntry._stopped) {
             logEntry.error = err.message;
             logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
@@ -620,7 +628,6 @@ const proxyServer = http.createServer((req, res) => {
     // Memory leak protection: if client disconnects, destroy proxy request
     res.on('close', () => {
       if (!res.writableEnded) {
-        console.log(`[PROXY] Client disconnected: ${req.method} ${req.url} (id: ${requestId})`);
         proxyReq.destroy();
       }
       delete activeRequests[requestId];
