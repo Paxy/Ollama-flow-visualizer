@@ -322,7 +322,6 @@ function buildGroups() {
 
   // Sortiraj: od najstarijeg ka najnovijem (chronological)
   map.forEach(g => g.items.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
-  console.log('[BUILD] grupe:', [...map.entries()].map(([k,g]) => ({key:k, lastTs:g.lastTs, firstTs:g.firstTs, cnt:g.items.length})));
   return Object.fromEntries(map);
 }
 
@@ -983,6 +982,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   socket.on('live-duration', data => {
+    socketLastUpdate = Date.now(); // uvek osveži — sprečava lažni polling fallback
     const i = logs.findIndex(l => l.id === data.id);
     if (i < 0 || logs[i].durationMs === data.durationMs) return;
     logs[i].durationMs = data.durationMs;
