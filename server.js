@@ -250,11 +250,17 @@ const proxyServer = http.createServer((req, res) => {
             }));
           
           // Extract tool results/outputs from tool role messages
+          // Uzimamo samo poslednjih MAX_TOOL_OUTPUTS (relevantni za trenutni request, ne ceo kontekst)
+          const MAX_TOOL_OUTPUTS = 5;
           const toolMsgs = body.messages.filter(m => m.role === 'tool');
-          logEntry.toolOutputs = toolMsgs.map(m => {
+          const recentToolMsgs = toolMsgs.slice(-MAX_TOOL_OUTPUTS);
+          logEntry.toolOutputs = recentToolMsgs.map(m => {
             let text = m.content || '';
             if (typeof text === 'string' && text.length > TOOL_OUT_MAX) text = text.slice(0, TOOL_OUT_MAX) + '...(truncated)';
-            return { toolCallId: m.tool_call_id, content: text };
+            // Ollama native API: šalje tool_name (ne tool_call_id). OpenAI: tool_call_id.
+            const tcid = m.tool_call_id || m.toolCallId || m.tool_calls_id || null;
+            const tname = m.tool_name || m.toolName || null;
+            return { toolCallId: tcid, toolName: tname, content: text };
           });
 
           // Build request summary for clean frontend display
@@ -375,13 +381,24 @@ const proxyServer = http.createServer((req, res) => {
                 || json.response || '';
               if (content) decodedText += content;
               // Tool calls u stream-u
+              // Podržava OpenAI format (choices[0].delta.tool_calls) i Ollama native (message.tool_calls)
               const dToolCalls = json.choices?.[0]?.delta?.tool_calls || json.message?.tool_calls;
               if (Array.isArray(dToolCalls) && dToolCalls.length > 0) {
                 for (const tc of dToolCalls) {
-                  const idx = tc.index ?? partialToolCalls.length;
-                  while (partialToolCalls.length <= idx) partialToolCalls.push({ function: { name: '', arguments: '' } });
+                  // Ollama native: function.index, OpenAI: tc.index
+                  const idx = tc.index ?? tc.function?.index ?? partialToolCalls.length;
+                  while (partialToolCalls.length <= idx) partialToolCalls.push({ id: null, function: { name: '', arguments: '' } });
+                  // Ollama native šalje ID direktno u tool_call objektu
+                  if (tc.id) partialToolCalls[idx].id = tc.id;
                   if (tc.function?.name) partialToolCalls[idx].function.name = tc.function.name;
-                  if (tc.function?.arguments) partialToolCalls[idx].function.arguments += tc.function.arguments;
+                  if (tc.function?.arguments) {
+                    // Ollama native: arguments je objekat (pun), OpenAI: inkrementalni string
+                    if (typeof tc.function.arguments === 'object') {
+                      partialToolCalls[idx].function.arguments = JSON.stringify(tc.function.arguments);
+                    } else {
+                      partialToolCalls[idx].function.arguments += tc.function.arguments;
+                    }
+                  }
                 }
               }
             } catch (e) { /* ignore parse errors */ }
@@ -430,10 +447,10 @@ const proxyServer = http.createServer((req, res) => {
           const finalToolCalls = partialToolCalls
             .filter(tc => tc.function && tc.function.name)
             .map(tc => {
-              // Find matching requestToolCall by function name (not by index)
-              let matchedId = null;
+              // Use Ollama native ID if available, otherwise match by function name from requestToolCalls
+              let matchedId = tc.id || null;
               const fnName = tc.function.name;
-              if (logEntry.requestToolCalls) {
+              if (!matchedId && logEntry.requestToolCalls) {
                 const match = logEntry.requestToolCalls.find(rtc => rtc.function && rtc.function.name === fnName);
                 if (match && match.id) matchedId = match.id;
               }
@@ -511,18 +528,23 @@ const proxyServer = http.createServer((req, res) => {
               const respTools = resp.message?.tool_calls || resp.choices?.[0]?.message?.tool_calls;
               if (Array.isArray(respTools) && respTools.length > 0) {
                 logEntry.toolCallsExec = respTools.map(tc => {
-                  // Find matching requestToolCall by function name
-                  let matchedId = null;
+                  // Use Ollama native ID if available, otherwise match by function name from requestToolCalls
+                  let matchedId = tc.id || null;
                   const fnName = tc.function?.name || 'unknown';
-                  if (logEntry.requestToolCalls) {
+                  if (!matchedId && logEntry.requestToolCalls) {
                     const match = logEntry.requestToolCalls.find(rtc => rtc.function && rtc.function.name === fnName);
                     if (match && match.id) matchedId = match.id;
                   }
+                  // Ollama native: arguments je objekat, OpenAI: JSON string
+                  const args = tc.function?.arguments;
                   return {
                     id: matchedId,
                     function: {
                       name: fnName,
-                      arguments: (() => { try { return JSON.parse(tc.function?.arguments); } catch(e) { return tc.function?.arguments || ''; } })()
+                      arguments: (() => {
+                        if (typeof args === 'object') return args;
+                        try { return JSON.parse(args); } catch(e) { return args || ''; }
+                      })()
                     }
                   };
                 });

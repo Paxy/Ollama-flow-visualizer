@@ -108,43 +108,6 @@
 let logs=[];
 let groupsTicker = null; // jedan interval za sve grupe (ticka svake 2s)
 
-// Globalna mapa tool call-ova po ID-u (popunjava se iz requestToolCalls i toolCallsExec svih itema)
-// Koristi se za ID-based match sa toolOutputs.toolCallId
-let allToolCallsById = {};
-let latestOutputReqById = {};  // toolCallId → id najnovijeg req-a sa tim outputom
-
-// Osvrži allToolCallsById i latestOutputReqById iz svih logova
-function rebuildToolCallMap() {
-  const m = {};
-  logs.forEach(log => {
-    // Iz requestToolCalls (imaju prave ID-eve iz request body-ja)
-    (log.requestToolCalls || []).forEach(tc => {
-      if (tc.id && !m[tc.id]) {
-        // Konvertuj rawArgs -> arguments za konzistentan prikaz
-        const copy = JSON.parse(JSON.stringify(tc));
-        if (copy.function && copy.function.rawArgs && !copy.function.arguments) {
-          try { copy.function.arguments = JSON.parse(copy.function.rawArgs); } catch(e) { copy.function.arguments = copy.function.rawArgs; }
-        }
-        delete copy.function.rawArgs;
-        m[tc.id] = copy;
-      }
-    });
-    // Iz toolCallsExec (mogu imati ID ako server uspe da ga poveže)
-    (log.toolCallsExec || []).forEach(tc => {
-      if (tc.id && !m[tc.id]) m[tc.id] = tc;
-    });
-  });
-  allToolCallsById = m;
-  // Pronađi najnoviji req za svaki toolCallId u toolOutputs
-  const lo = {};
-  logs.forEach(log => {
-    (log.toolOutputs || []).forEach(to => {
-      if (to.toolCallId) lo[to.toolCallId] = log.id;
-    });
-  });
-  latestOutputReqById = lo;
-}
-
 // Sačuvaj proširena stanja: expandedGroups = {key: true}
 let expandedGroups = {};
 function saveExpandedState() {
@@ -243,68 +206,70 @@ function toggleReq(el) {
   el.nextElementSibling.classList.toggle('visible');
 }
 
-// Helper: uzima tool callove iz odgovarajućeg izvora
-// Prioritizuje toolCallsExec (iz Ollama response streama) nad requestToolCalls (iz request body-ja)
-// jer toolCallsExec sadrži ORIGINALNE tool callove iz prvog odgovora
-// Legacy - unused stubs for backward compat
-getDisplayToolCalls = function(item) { return []; };
-generateToolHtml = function(rtc, tos) { return ''; };
-
-// Generates HTML for tool calls WITH outputs, matched by ID from the global allToolCallsById map.
-// Used in the request where tool outputs arrived. itemId je ID req-a kako bi proverili da li je najnoviji.
-function generateToolOutputHtml(tos, itemId) {
-  if (!tos || !tos.length) return '';
+// Unificirani render tool call-ova i output-a.
+// Za svaki tool call traži matching output po toolCallId → prikazuje inline.
+// Ne-matchovani output-i se prikazuju odvojeno.
+function renderToolSection(toolCalls, toolOutputs) {
+  if ((!toolCalls || !toolCalls.length) && (!toolOutputs || !toolOutputs.length)) return '';
   let html = '';
-  tos.forEach(to => {
-    if (!to.toolCallId) return;
-    // Prikazi output samo u najnovijem req-u koji ima ovaj toolCallId
-    if (itemId && latestOutputReqById[to.toolCallId] && latestOutputReqById[to.toolCallId] !== itemId) return;
-    const tc = allToolCallsById[to.toolCallId] || null;
-    if (!tc) return; // no matching tool call
-    const nm = tc.function?.name || 'unknown';
-    // Format args
-    let args = '';
-    const fnArgs = tc.function?.arguments || tc.function?.rawArgs;
-    if (fnArgs) {
-      let a = fnArgs;
-      if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
-      else if (typeof a === 'string') { try { args = JSON.stringify(JSON.parse(a), null, 2); } catch(e) { args = a; } }
-    }
-    // Format output
-    let outVal = '';
-    let v = to.content || to.output || to.result || to.response || to.value || JSON.stringify(to);
-    if (typeof v === 'object') v = JSON.stringify(v, null, 2);
-    else if (typeof v === 'string') v = v.replace(/\\n/g, '\n');
-    outVal = v;
-    html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
-    html += '<div class="tp-name" style="color:#ffa657;font-size:.82rem;font-weight:600;margin-bottom:4px">\u26a1 ' + escHtml(nm) + '</div>';
-    html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args || '{}') + '</pre></div>';
-    html += '<div class="tp-out" style="border-top:1px solid #2a2e35;padding-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Output:</div><pre style="margin:4px 0 0;font-size:.72rem;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(outVal) + '</pre></div>';
-    html += '</div>';
-  });
-  return html;
-}
+  const matchedOutputKeys = new Set(); // Set of "index" or "toolCallId" for matched outputs
 
-// Generates HTML for tool calls WITHOUT outputs (the LLM requested tools, waiting for exec).
-// Used in the request where toolCallsExec was received.
-function generateToolCallHtml(calls) {
-  if (!calls || !calls.length) return '';
-  let html = '';
-  calls.forEach(tc => {
-    const nm = tc.function?.name || 'unknown';
-    let args = '';
-    const fnArgs = tc.function?.arguments || tc.function?.rawArgs;
-    if (fnArgs) {
-      let a = fnArgs;
-      if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
-      else if (typeof a === 'string') { try { args = JSON.stringify(JSON.parse(a), null, 2); } catch(e) { args = a; } }
-    }
-    html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
-    html += '<div class="tp-name" style="color:#ffa657;font-size:.82rem;font-weight:600;margin-bottom:4px">\u26a1 ' + escHtml(nm) + '</div>';
-    html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args || '{}') + '</pre></div>';
-    html += '<div class="tp-out" style="border-top:1px solid #2a2e35;padding-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Exec:</div><div style="color:#8b949e;font-size:.7rem;margin-top:2px">⏳ waiting for output...</div></div>';
-    html += '</div>';
-  });
+  // 1. Prikaži tool call-ove — ako postoji matching output, prikaži ga inline
+  if (toolCalls && toolCalls.length) {
+    toolCalls.forEach(tc => {
+      const nm = tc.function?.name || 'unknown';
+      let args = '';
+      const fnArgs = tc.function?.arguments || tc.function?.rawArgs;
+      if (fnArgs) {
+        let a = fnArgs;
+        if (typeof a === 'object') { args = JSON.stringify(a, null, 2); }
+        else if (typeof a === 'string') { try { args = JSON.stringify(JSON.parse(a), null, 2); } catch(e) { args = a; } }
+      }
+      // Traži matching output — prvo po toolCallId, pa po toolName / function name
+      const output = (toolOutputs || []).find((to, oi) => {
+        if (to.toolCallId && to.toolCallId === tc.id) return true;
+        // Ollama native: match po tool_name → function name
+        if (to.toolName && to.toolName === nm) return true;
+        // Fallback: match po poziciji (output index === tool call index)
+        // Samo ako nijedan output nema toolCallId (Ollama native format)
+        const allNoIds = (toolOutputs || []).every(t => !t.toolCallId);
+        if (allNoIds && oi === (tc._groupIndex != null ? tc._groupIndex : toolCalls.indexOf(tc))) return true;
+        return false;
+      });
+      if (output) matchedOutputKeys.add(output.toolCallId || ('_pos_' + toolOutputs.indexOf(output)));
+      let outHtml = '';
+      if (output) {
+        let v = output.content || output.output || output.result || output.response || output.value || JSON.stringify(output);
+        if (typeof v === 'object') v = JSON.stringify(v, null, 2);
+        else if (typeof v === 'string') v = v.replace(/\\n/g, '\n');
+        outHtml = '<div style="border-top:1px solid #2a2e35;padding-top:4px;margin-top:4px"><div style="color:#50fa7b;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Output:</div><pre style="margin:4px 0 0;font-size:.72rem;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:#c5c8c6">' + escHtml(v) + '</pre></div>';
+      } else {
+        outHtml = '<div style="border-top:1px solid #2a2e35;padding-top:4px;margin-top:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCE4 Exec:</div><div style="color:#8b949e;font-size:.7rem;margin-top:2px">⏳ waiting for output...</div></div>';
+      }
+      html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
+      html += '<div class="tp-name" style="color:#ffa657;font-size:.82rem;font-weight:600;margin-bottom:4px">\u26a1 ' + escHtml(nm) + (tc.id ? ' <span style="font-size:.6rem;color:#6272a4">(' + escHtml(tc.id.slice(0,16)) + ')</span>' : '') + '</div>';
+      if (args) html += '<div class="tp-args" style="margin-bottom:4px"><div style="color:#8b949e;font-size:.72rem;font-weight:500">\uD83D\uDCCB Args:</div><pre style="margin:4px 0 0;font-size:.7rem;overflow:auto;color:#c5c8c6;white-space:pre-wrap;word-break:break-word">' + escHtml(args) + '</pre></div>';
+      html += outHtml;
+      html += '</div>';
+    });
+  }
+
+  // 2. Prikaži ne-matchovane output-e (orphan tool outputs)
+  if (toolOutputs && toolOutputs.length) {
+    toolOutputs.forEach((to, oi) => {
+      const key = to.toolCallId || ('_pos_' + oi);
+      if (matchedOutputKeys.has(key)) return;
+      let v = to.content || to.output || to.result || to.response || to.value || JSON.stringify(to);
+      if (typeof v === 'object') v = JSON.stringify(v, null, 2);
+      else if (typeof v === 'string') v = v.replace(/\\n/g, '\n');
+      const label = to.toolName ? escHtml(to.toolName) : (to.toolCallId ? escHtml(to.toolCallId.slice(0, 16)) : 'output ' + (oi + 1));
+      html += '<div class="req-tool-pair" style="margin:6px 0;padding:8px 10px;background:#0d1117;border:1px solid #2a2e35;border-radius:6px">';
+      html += '<div class="tp-name" style="color:#50fa7b;font-size:.82rem;font-weight:600;margin-bottom:4px">\uD83D\uDCE4 Output: ' + label + '</div>';
+      html += '<pre style="margin:0;font-size:.72rem;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:#c5c8c6">' + escHtml(v) + '</pre>';
+      html += '</div>';
+    });
+  }
+
   return html;
 }
 
@@ -515,15 +480,8 @@ function buildGroupHtml(g) {
     
     const previewTxtB = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'…':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
     
-    // Tool calls/outputs: show tool exec (from toolCallsExec or requestToolCalls), outputs matched by ID
-    let toolPairsHtml = '';
-    if (item.toolOutputs && item.toolOutputs.length > 0) {
-      toolPairsHtml += generateToolOutputHtml(item.toolOutputs, item.id);
-    } else if (item.toolCallsExec && item.toolCallsExec.length > 0) {
-      toolPairsHtml += generateToolCallHtml(item.toolCallsExec);
-    } else if (item.requestToolCalls && item.requestToolCalls.length > 0) {
-      toolPairsHtml += generateToolCallHtml(item.requestToolCalls);
-    }
+    // Tool calls/outputs: prikaži i toolCallsExec i toolOutputs (ne samo jedno ili drugo)
+    let toolPairsHtml = renderToolSection(item.toolCallsExec || item.requestToolCalls, item.toolOutputs);
     let rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
     // Request summary - clean display instead of raw JSON dump
     let rq = item.requestSummary ? `
@@ -689,15 +647,8 @@ function render(groups, onlyKey) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            // Tool calls/outputs: show tool exec (from toolCallsExec or requestToolCalls), outputs matched by ID
-            let toolPairsHtml = '';
-            if (item.toolOutputs && item.toolOutputs.length > 0) {
-              toolPairsHtml += generateToolOutputHtml(item.toolOutputs, item.id);
-            } else if (item.toolCallsExec && item.toolCallsExec.length > 0) {
-              toolPairsHtml += generateToolCallHtml(item.toolCallsExec);
-            } else if (item.requestToolCalls && item.requestToolCalls.length > 0) {
-              toolPairsHtml += generateToolCallHtml(item.requestToolCalls);
-            }
+            // Tool calls/outputs: unificirani render (povezuje call + output po toolCallId)
+            let toolPairsHtml = renderToolSection(item.toolCallsExec || item.requestToolCalls, item.toolOutputs);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             // Request summary - clean display instead of raw JSON dump
             const rq = item.requestSummary ? `
@@ -745,15 +696,8 @@ function render(groups, onlyKey) {
             const rc = item.status === 'error' ? 'err' : (item.status === 'pending' ? 'pend' : (item.status === 'streaming' ? 'stream' : 'ok'));
             const pv = item.decodedText ? item.decodedText.replace(/\n/g,' ').slice(0,500) + (item.decodedText.length>500?'...':'') : (item.error ? '❌ ' + item.error.slice(0,200) : '');
             const rErr = item.error ? '<div class="detail-section"><span class="lbl" style="color:#ff5555">⚠️ Error:</span><div class="decoded-prompt" style="color:#ff5555;border-color:#5a1a1a;font-size:.75rem;padding:8px">' + escHtml(item.error.slice(0,300)) + '</div></div>' : '';
-            // Tool calls/outputs: show tool exec (from toolCallsExec or requestToolCalls), outputs matched by ID
-            let toolPairsHtml = '';
-            if (item.toolOutputs && item.toolOutputs.length > 0) {
-              toolPairsHtml += generateToolOutputHtml(item.toolOutputs, item.id);
-            } else if (item.toolCallsExec && item.toolCallsExec.length > 0) {
-              toolPairsHtml += generateToolCallHtml(item.toolCallsExec);
-            } else if (item.requestToolCalls && item.requestToolCalls.length > 0) {
-              toolPairsHtml += generateToolCallHtml(item.requestToolCalls);
-            }
+            // Tool calls/outputs: unificirani render (povezuje call + output po toolCallId)
+            let toolPairsHtml = renderToolSection(item.toolCallsExec || item.requestToolCalls, item.toolOutputs);
             const rb = item.responseBody ? `<div class="detail-section"><span class="lbl">📥 Response:</span><pre>${highlightJSON(prettyJSON(item.responseBody))}</pre></div>` : '';
             const rq = item.requestBody ? `<div class="detail-section"><span class="lbl req-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('show')">📤 Request <span style="font-size:.6rem;color:#565b66">(click to show)</span></span><pre class="req-body-raw req-collapsed">${escHtml(fixNewlines(item.requestBody))}</pre></div>` : '';
             const nr = document.createElement('div');
@@ -877,7 +821,7 @@ function render(groups, onlyKey) {
 function refresh() {
   fetch('/api/logs').then(r => r.json()).then(data => {
     logs = data.slice(0, 200);
-    rebuildToolCallMap();
+    
     const g = buildGroups();
     updateSummary(g);
     render(g);
@@ -909,12 +853,12 @@ setInterval(pollLogs, 5000); // polling samo kad Socket.IO padne
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clrBtn').onclick = () => {
   fetch('/api/logs', { method: 'DELETE' }).then(r => r.json()).then(() => {
-    logs = []; expandedGroups = {}; rebuildToolCallMap(); refresh();
-  }).catch(() => { logs = []; expandedGroups = {}; rebuildToolCallMap(); refresh(); });
+    logs = []; expandedGroups = {}; refresh();
+  }).catch(() => { logs = []; expandedGroups = {}; refresh(); });
 };
   startGroupsTicker();
 
-  socket.on('init', data => { logs = data; rebuildToolCallMap(); refresh(); });
+  socket.on('init', data => { logs = data; refresh(); });
   socket.on('log-update', payload => {
     const i = logs.findIndex(l => l.id === payload.id);
     const statusChanged = i < 0 || logs[i].status !== payload.status;
@@ -992,7 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       // Status se promenio (streaming->done/error, pending->error) ili nov req — samo tu grupu
-      rebuildToolCallMap();
+      
       const g = buildGroups();
       updateSummary(g);
       const matchKey = payload.id ? Object.values(g).find(grp => grp.items.some(it => it.id === payload.id))?.key : null;
