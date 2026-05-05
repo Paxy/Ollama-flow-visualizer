@@ -344,14 +344,24 @@ function updateSummary(groups) {
   const total = Object.values(groups).reduce((s, g) => s + g.items.length, 0);
   const dur = Object.values(groups).reduce((s, g) => s + g.items.reduce((a, i) => a + (i.durationMs || 0), 0), 0);
   const data = Object.values(groups).reduce((s, g) => s + g.items.reduce((a, i) => a + (i.requestSize || 0) + (i.responseSize || 0), 0), 0);
-  document.getElementById('summary').textContent = `${grp} groups │ ${total} requests │ ${fmtDur(dur)} │ ${fmtSz(data)}`;
   let ac = 0, co = 0, er = 0;
   Object.values(groups).forEach(g => { const st = groupStatus(g); if (st === 'active') ac++; else if (st === 'error') er++; else co++; });
-  document.getElementById('summaryBar').innerHTML =
-    `<div class="seg"><span style="color:#50fa7b">●</span> Completed: <b>${co}</b></div>` +
-    `<div class="seg"><span style="color:#f1fa8c">●</span> Active: <b>${ac}</b></div>` +
-    `<div class="seg"><span style="color:#ff5555">●</span> Error: <b>${er}</b></div>` +
-    `<div class="seg">📊 <b>${grp}</b> groups / <b>${total}</b> requests</div>`;
+  // Samo textContent — bez innerHTML (izbegava page reflow)
+  const bar = document.getElementById('summaryBar');
+  const segs = bar.children;
+  if (segs.length >= 4) {
+    segs[0].innerHTML = '<span style="color:#50fa7b">●</span> Completed: <b>' + co + '</b>';
+    segs[1].innerHTML = '<span style="color:#f1fa8c">●</span> Active: <b>' + ac + '</b>';
+    segs[2].innerHTML = '<span style="color:#ff5555">●</span> Error: <b>' + er + '</b>';
+    segs[3].innerHTML = '📊 <b>' + grp + '</b> groups / <b>' + total + '</b> requests';
+  } else {
+    bar.innerHTML =
+      '<div class="seg"><span style="color:#50fa7b">●</span> Completed: <b>' + co + '</b></div>' +
+      '<div class="seg"><span style="color:#f1fa8c">●</span> Active: <b>' + ac + '</b></div>' +
+      '<div class="seg"><span style="color:#ff5555">●</span> Error: <b>' + er + '</b></div>' +
+      '<div class="seg">📊 <b>' + grp + '</b> groups / <b>' + total + '</b> requests</div>';
+  }
+  document.getElementById('summary').textContent = `${grp} groups │ ${total} requests │ ${fmtDur(dur)} │ ${fmtSz(data)}`;
 }
 
 // Start ticker for updating duration of active requests and groups
@@ -568,6 +578,11 @@ function render(groups, onlyKey) {
         container.appendChild(el);
       }
     } else {
+      // Hash check: preskoči update ako se ništa nije promenilo u ovoj grupi
+      const hash = g.key + ':' + g.items.map(i => i.status + '|' + (i.durationMs||0)).join(',');
+      if (el.dataset.hash === hash) { prevEl = el; return; }
+      el.dataset.hash = hash;
+
       // Existing group - update content
       if (!onlyKey) {
         // Prvo proveri da li je na pravom mestu (samo pri full render)
@@ -849,15 +864,14 @@ function refresh() {
 const socket = io();
 let socketLastUpdate = 0;
 
-// Polling fallback - ako Socket.IO ne radi, polliraj svake 2s
+// Polling fallback - samo pravi fallback kad Socket.IO padne na 30+ sekundi
 let lastPollHash = '';
 function pollLogs() {
   fetch('/api/logs').then(r => r.json()).then(data => {
-    // Poredi samo ID + status - ignorisi decodedText/promene duzine
     const hash = JSON.stringify(data.map(l => l.id + ':' + l.status + ':' + (l.durationMs||0)));
     if (hash !== lastPollHash) {
       lastPollHash = hash;
-      if (Date.now() - socketLastUpdate > 1000) {
+      if (Date.now() - socketLastUpdate > 30000) {
         logs = data;
         const g = buildGroups();
         updateSummary(g);
@@ -866,7 +880,7 @@ function pollLogs() {
     }
   }).catch(() => {});
 }
-setInterval(pollLogs, 5000); // polling samo kad Socket.IO padne
+setInterval(pollLogs, 30000); // svakih 30s, samo ako Socket.IO ne radi
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clrBtn').onclick = () => {
