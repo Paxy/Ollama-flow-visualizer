@@ -856,7 +856,8 @@ document.addEventListener('DOMContentLoaded', () => {
     logs = []; expandedGroups = {}; refresh();
   }).catch(() => { logs = []; expandedGroups = {}; refresh(); });
 };
-  startGroupsTicker();
+  // Ticker disabled — live-duration socket event handles all duration updates
+  // bez konstantnog DOM reflow-a koji prekida skrolovanje
 
   socket.on('init', data => { logs = data; refresh(); });
   socket.on('log-update', payload => {
@@ -945,25 +946,29 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   socket.on('live-duration', data => {
     const i = logs.findIndex(l => l.id === data.id);
-    if (i >= 0 && logs[i].durationMs !== data.durationMs) {
-      logs[i].durationMs = data.durationMs;
-      document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(data.id)}"]`).forEach(el => {
-        const durEl = el.querySelector('.r-dur');
-        if (durEl) durEl.textContent = fmtDur(data.durationMs);
-      });
-      const g = buildGroups();
-      updateSummary(g);
-      Object.values(g).forEach(grp => {
-        const el = document.querySelector(`.group[data-group-key="${CSS.escape(grp.key)}"]`);
-        if (!el) return;
-        const hdr = el.querySelector('.g-hdr');
-        if (!hdr) return;
-        const st = groupStatus(grp);
-        hdr.querySelector('.status').textContent = st === 'active' ? '⏳ Active' : (st === 'error' ? '⚠ Interrupted' : '✓ Completed');
-        hdr.querySelector('.status').className = `status ${st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete')}`;
-        hdr.querySelector('.dur').textContent = `⏱ ${fmtDur(grp.items.reduce((s, i) => s + (i.durationMs || 0), 0))}`;
-      });
+    if (i < 0 || logs[i].durationMs === data.durationMs) return;
+    logs[i].durationMs = data.durationMs;
+    // Samo osveži duration za taj request — bez rebuild-a svih grupa
+    document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(data.id)}"]`).forEach(el => {
+      const durEl = el.querySelector('.r-dur');
+      if (durEl) durEl.textContent = fmtDur(data.durationMs);
+    });
+    // Osveži samo grupni header koji sadrži ovaj request
+    const g = buildGroups();
+    const match = Object.values(g).find(grp => grp.items.some(it => it.id === data.id));
+    if (match) {
+      const groupEl = document.querySelector(`.group[data-group-key="${CSS.escape(match.key)}"]`);
+      if (groupEl) {
+        const hdr = groupEl.querySelector('.g-hdr');
+        if (hdr) {
+          const st = groupStatus(match);
+          hdr.querySelector('.status').textContent = st === 'active' ? '⏳ Active' : (st === 'error' ? '⚠ Interrupted' : '✓ Completed');
+          hdr.querySelector('.status').className = `status ${st === 'error' ? 'error' : (st === 'active' ? 'active' : 'complete')}`;
+          hdr.querySelector('.dur').textContent = `⏱ ${fmtDur(match.items.reduce((s, i) => s + (i.durationMs || 0), 0))}`;
+        }
+      }
     }
+    updateSummary(g);
   });
   refresh();
 });

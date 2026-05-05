@@ -334,8 +334,10 @@ const proxyServer = http.createServer((req, res) => {
       headers: {
         ...filteredHeaders,
         host: `${OLLAMA_HOST}:${OLLAMA_PORT}`,
+        connection: 'close',
         'content-length': requestBodyBuffer.length
       },
+      agent: false, // nova konekcija za svaki request, izbegava keep-alive race condition
       timeout: 600000 // 10 min — enough for long pull/chat requests
     }, (proxyRes) => {
       logEntry.responseStatus = proxyRes.statusCode;
