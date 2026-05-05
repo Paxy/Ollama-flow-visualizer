@@ -532,6 +532,8 @@ function buildGroupHtml(g) {
 let _sortedOnce = false;
 
 function render(groups, onlyKey) {
+  const reason = onlyKey ? 'status-change:' + (onlyKey || '?') : (new Error().stack?.split('\n')[2]?.trim() || '?');
+  console.log('[REDRAW] reason=' + reason + ' groups=' + Object.keys(groups).length + ' onlyKey=' + (onlyKey || 'none'));
   const container = document.getElementById('groups');
   const allVals = Object.values(groups);
   // Sort only na prvom renderu (ucitavanje strane)
@@ -852,6 +854,7 @@ function render(groups, onlyKey) {
 }
 
 function refresh() {
+  console.log('[REDRAW] refresh (full page init)');
   fetch('/api/logs').then(r => r.json()).then(data => {
     logs = data.slice(0, 200);
     
@@ -872,6 +875,7 @@ function pollLogs() {
     if (hash !== lastPollHash) {
       lastPollHash = hash;
       if (Date.now() - socketLastUpdate > 30000) {
+        console.log('[REDRAW] polling-fallback (no socket for ' + Math.floor((Date.now() - socketLastUpdate)/1000) + 's)');
         logs = data;
         const g = buildGroups();
         updateSummary(g);
@@ -899,6 +903,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else { logs.unshift(payload); if (logs.length > 200) logs.pop(); }
     socketLastUpdate = Date.now();
     if (!statusChanged && (payload.status === 'completed' || payload.status === 'error')) {
+      console.log('[UPDATE] completed/error no-change id=' + payload.id + ' status=' + payload.status);
       // Completed request sa istim statusom — samo osvezi preview, duration i decodedText
       document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(payload.id)}"]`).forEach(el => {
         const hdr = el.querySelector('.req-hdr');
@@ -929,6 +934,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     } else if (i >= 0 && logs[i].status === 'pending' && payload.status === 'streaming') {
+      console.log('[UPDATE] pending→streaming id=' + payload.id);
       // pending->streaming — samo osvezi req header, bez render-a (ne diraj done req-ove)
       document.querySelectorAll(`.req-row[data-req-id="${CSS.escape(payload.id)}"]`).forEach(el => {
         const hdr = el.querySelector('.req-hdr');
@@ -969,7 +975,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       // Status se promenio (streaming->done/error, pending->error) ili nov req — samo tu grupu
-      
+      console.log('[REDRAW] status-changed id=' + payload.id + ' old=' + (i >= 0 ? logs[i].status : 'new') + ' new=' + payload.status);
       const g = buildGroups();
       updateSummary(g);
       const matchKey = payload.id ? Object.values(g).find(grp => grp.items.some(it => it.id === payload.id))?.key : null;
@@ -989,6 +995,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const g = buildGroups();
     const match = Object.values(g).find(grp => grp.items.some(it => it.id === data.id));
     if (match) {
+      console.log('[TICK] live-duration id=' + data.id + ' dur=' + fmtDur(data.durationMs));
       const groupEl = document.querySelector(`.group[data-group-key="${CSS.escape(match.key)}"]`);
       if (groupEl) {
         const hdr = groupEl.querySelector('.g-hdr');
