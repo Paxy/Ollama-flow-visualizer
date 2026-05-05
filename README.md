@@ -12,9 +12,11 @@ Intercepts all requests to Ollama, logs them in real-time, and displays them in 
 
 ## Features
 
-- **Transparent proxy** — sits between OpenClaw (or any OpenAI-compatible client) and Ollama. No client-side changes needed.
+- **Transparent proxy** — sits between OpenClaw (or any Ollama/OpenAI-compatible client) and Ollama. No client-side changes needed. Supports both native `/api/chat` and `/v1/chat/completions` endpoints.
 - **Live dashboard** — Socket.IO-powered real-time UI at `http://<host>:8080`
 - **Smart grouping** — groups requests by user prompt (same prompt = same group on the dashboard)
+- **Thinking/reasoning extraction** — automatically extracts and displays `thinking` tokens from Ollama-native streaming chunks (Gemma 4, Qwen 3.5, etc.) and `reasoning_content` from OpenAI-compatible models. No raw JSON metadata in the response view.
+- **Native Ollama API support** — full support for Ollama's native `/api/chat` protocol including multimodal (text + image) requests, thinking tokens, and tool calls
 - **Tool call matching & output lookup** — tool calls (`df`, `cat`, `exec`...) and their outputs are automatically matched by `toolCallId`, even when the call and its output arrive in separate requests within the same group
 - **Streaming support** — real-time duration updates for streaming responses
 - **Error source identification** — automatically detects whether an error originated from Ollama (timeout, connection refused, 5xx) or the Agent (interrupted, tool failure)
@@ -129,28 +131,42 @@ exec $NODE server.js
 
 ## Configuring OpenClaw to use the proxy
 
-Define the proxy as a custom OpenAI-compatible provider in `openclaw.json`:
+Define the proxy as an Ollama-native provider in `openclaw.json`. Use `api: "ollama"` (native Ollama API, not OpenAI-compatible) — this is required for image support and thinking/reasoning extraction.
 
 ```json
 {
   "providers": {
     "ollama2": {
-      "baseUrl": "http://localhost:11435/v1",
-      "api": "openai-completions",
-      "apiKey": "ollama-local",
+      "baseUrl": "http://localhost:11435",
+      "api": "ollama",
       "models": [
+        {
+          "id": "qwen3.5:35b-a3b",
+          "name": "Qwen3.5 35B-A3B Q4_K_M (MoE)",
+          "api": "ollama",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        },
+        {
+          "id": "gemma4:26b",
+          "name": "Gemma 4 26B Q4_K_M",
+          "api": "ollama",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 128000,
+          "maxTokens": 16384
+        },
         {
           "id": "qwen3.6:27b-q4_K_M",
           "name": "Qwen3.6 27B Q4_K_M (local)",
-          "api": "openai-completions",
+          "api": "ollama",
           "reasoning": false,
           "input": ["text"],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 128000,
           "maxTokens": 16384
         }
@@ -160,18 +176,63 @@ Define the proxy as a custom OpenAI-compatible provider in `openclaw.json`:
   "agents": {
     "defaults": {
       "model": {
-        "primary": "ollama2/qwen3.6-27b-local"
+        "primary": "ollama2/qwen3.5:35b-a3b",
+        "fallbacks": [
+          "ollama2/gemma4:26b",
+          "ollama2/qwen3.6:27b-q4_K_M"
+        ]
       }
     }
   }
 }
 ```
 
-The key parts:
-- `baseUrl` — points to the Flow Visualizer proxy (`:11435`), not directly to Ollama (`:11434`)
-- `api` — `"openai-completions"` (the proxy uses OpenAI-compatible format)
-- `apiKey` — any string is fine, the proxy doesn't validate it
-- The model `id` must match the actual Ollama model name
+### Key notes
+
+- `baseUrl` — points to the Flow Visualizer proxy (`http://localhost:11435`), **without `/v1` suffix** (native Ollama API)
+- `api` — **must be `"ollama"`** (native Ollama API). OpenClaw's Ollama plugin handles the actual `/api/chat` protocol
+- `apiKey` — **not needed** for Ollama native API (the proxy doesn't validate it)
+- The model `id` must match the actual Ollama model name exactly (e.g. `gemma4:26b`)
+- For models with image support, add `"image"` to the `input` array (e.g. `gemma4:26b`)
+- The proxy transparently passes through all Ollama-native streaming chunks — thinking/reasoning tokens are extracted and displayed on the dashboard
+
+#### Dual-provider setup (direct + proxy)
+
+You can keep a direct Ollama provider as a fallback:
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://172.16.100.5:11434",
+      "api": "ollama",
+      "models": [ /* same models, direct connection */ ]
+    },
+    "ollama2": {
+      "baseUrl": "http://localhost:11435",
+      "api": "ollama",
+      "models": [ /* same models, via proxy */ ]
+    }
+  }
+}
+```
+
+Agent fallback chain example (from our production setup):
+
+```json
+{
+  "model": {
+    "primary": "ollama2/qwen3.5:35b-a3b",
+    "fallbacks": [
+      "ollama2/gemma4:26b",
+      "ollama/gemma4:26b",
+      "ollama2/qwen3.6:27b-q4_K_M"
+    ]
+  }
+}
+```
+
+This gives you monitored requests through the proxy first, with direct-to-Ollama fallback if the proxy is down.
 
 Now OpenClaw sends all requests through the proxy, and they appear on the dashboard at `http://<proxy-host>:8080`.
 

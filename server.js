@@ -363,7 +363,16 @@ const proxyServer = http.createServer((req, res) => {
               let data = line;
               if (line.startsWith('data: ')) data = line.slice(6);
               const json = JSON.parse(data);
-              const content = json.choices?.[0]?.delta?.content || json.choices?.[0]?.delta?.reasoning || json.message?.content || json.message?.reasoning || json.response || '';
+              // Ekstrahuj content, thinking i reasoning iz svih poznatih formata
+              const content = json.choices?.[0]?.delta?.content
+                || json.choices?.[0]?.delta?.reasoning
+                || json.choices?.[0]?.delta?.reasoning_content
+                || json.choices?.[0]?.delta?.thinking
+                || json.message?.content
+                || json.message?.reasoning
+                || json.message?.reasoning_content
+                || json.message?.thinking
+                || json.response || '';
               if (content) decodedText += content;
               // Tool calls u stream-u
               const dToolCalls = json.choices?.[0]?.delta?.tool_calls || json.message?.tool_calls;
@@ -491,12 +500,10 @@ const proxyServer = http.createServer((req, res) => {
             let decodedText = '';
             try {
               const resp = JSON.parse(responseStr);
-              if (resp.message && resp.message.content) {
-                decodedText = resp.message.content;
-              } else if (resp.message && resp.message.reasoning) {
-                decodedText = resp.message.reasoning;
+              if (resp.message && (resp.message.content || resp.message.reasoning || resp.message.reasoning_content || resp.message.thinking)) {
+                decodedText = resp.message.thinking || resp.message.reasoning_content || resp.message.reasoning || resp.message.content || '';
               } else if (resp.choices && resp.choices[0] && resp.choices[0].message) {
-                decodedText = resp.choices[0].message.content || resp.choices[0].message.reasoning || '';
+                decodedText = resp.choices[0].message.thinking || resp.choices[0].message.reasoning_content || resp.choices[0].message.reasoning || resp.choices[0].message.content || '';
               } else if (resp.response) {
                 decodedText = resp.response;
               }

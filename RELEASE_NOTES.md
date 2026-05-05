@@ -2,6 +2,26 @@
 
 Release notes for project: Ollama Flow Visualizer (https://github.com/Paxy/Ollama-flow-visualizer)
 
+## v1.3
+Release date: 2026-05-05
+Tag: v1.3
+
+### ⭐ New Features
+- **Native Ollama API thinking/reasoning extraction**: Automatically extracts `thinking` tokens from Ollama-native `/api/chat` streaming chunks (field `message.thinking`) and `reasoning_content` from OpenAI-compatible models. Response body now shows only the decoded thinking/reasoning text, never raw JSON metadata.
+- **Multimodal support**: The proxy transparently passes through image requests when using Ollama native API (`"input": ["text", "image"]` in model config)
+
+### 🛠️ Bug Fixes
+- **Raw JSON in thinking responses**: Fixed issue where streaming models (Gemma 4, Qwen 3.5 with thinking) would display raw JSON chunks in the response body instead of the decoded thinking text. The proxy now correctly extracts all `message.thinking` and `delta.thinking` fields across streaming and non-streaming responses.
+
+### 📝 Documentation
+- README updated for Ollama native API configuration (`api: "ollama"`), with production config examples
+- Added dual-provider setup example (proxy + direct fallback)
+
+### Stats
+- 2 new features, 1 bug fix, 1 doc commit
+
+---
+
 ## v1.2
 Release date: 2026-04-29
 Tag: v1.2
