@@ -456,12 +456,14 @@ function updateDecodedSection(det, g) {
   const oldDecodedLabel = det.querySelector('.decoded-prompt');
   const oldDecodedText = oldDecodedLabel ? oldDecodedLabel.textContent || '' : '';
   if (fullText.length > oldDecodedText.length) {
-    // Samo apdejtuj textContent, bez outerHTML zamene i forsiranog skrola
     if (oldDecodedLabel) {
       oldDecodedLabel.textContent = fullText;
+      oldDecodedLabel.scrollTop = oldDecodedLabel.scrollHeight;
     } else {
       const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
       det.insertAdjacentHTML('afterbegin', newSec);
+      const dp = det.querySelector('.decoded-prompt');
+      if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
     }
   }
 }
@@ -709,9 +711,12 @@ function render(groups, onlyKey) {
           if (fullText.length > oldDecodedText.length) {
             if (oldDecodedLabel) {
               oldDecodedLabel.textContent = fullText;
+              oldDecodedLabel.scrollTop = oldDecodedLabel.scrollHeight;
             } else {
               const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
               det.insertAdjacentHTML('afterbegin', newSec);
+              const dp = det.querySelector('.decoded-prompt');
+              if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
             }
           }
         }
@@ -865,9 +870,12 @@ function render(groups, onlyKey) {
             if (fullText.length > oldDecodedText.length) {
               if (oldDecodedLabel) {
                 oldDecodedLabel.textContent = fullText;
+                oldDecodedLabel.scrollTop = oldDecodedLabel.scrollHeight;
               } else {
                 const newSec = '<div class="detail-section"><span class="lbl">💬 Dešifrovani odgovor:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
                 det.insertAdjacentHTML('afterbegin', newSec);
+                const dp = det.querySelector('.decoded-prompt');
+                if (dp) requestAnimationFrame(() => { dp.scrollTop = dp.scrollHeight; });
               }
             }
           }
@@ -1064,6 +1072,23 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
     updateSummary(g);
+  });
+  // Real-time decoded text updates tokom streaminga — NE re-renderuje, samo ažurira text
+  socket.on('stream-decoded', data => {
+    if (!data.id || !data.text) return;
+    // Nađi grupu koja sadrži ovaj request
+    const g = buildGroups();
+    const match = Object.values(g).find(grp => grp.items.some(it => it.id === data.id));
+    if (!match) return;
+    const groupEl = document.querySelector(`.group[data-group-key="${CSS.escape(match.key)}"]`);
+    if (!groupEl) return;
+    const det = groupEl.querySelector('.g-det');
+    if (!det || !det.classList.contains('open')) return; // ne ažuriraj skrivene grupe
+    const dp = det.querySelector('.decoded-prompt');
+    if (dp) {
+      dp.textContent = data.text;
+      dp.scrollTop = dp.scrollHeight;
+    }
   });
   refresh();
 });

@@ -23,7 +23,8 @@ const PROXY_PORT  = config.proxy?.port || 11435;
 const OLLAMA_HOST = config.ollama?.host || '172.16.100.5';
 const OLLAMA_PORT = config.ollama?.port || 11434;
 const WEB_PORT    = config.dashboard?.port || 8080;
-const STREAM_TIMEOUT_MS = config.limits?.streamTimeoutMs || 600000;
+const REQUEST_TIMEOUT_MS = config.limits?.requestTimeoutMs || 1_800_000; // 30 min — global watchdog za sve requeste
+const STREAM_TIMEOUT_MS = config.limits?.streamTimeoutMs || 1_800_000; // 30 min — watchdog za streaming (backward compat)
 
 const TARGET_URL = `http://${OLLAMA_HOST}:${OLLAMA_PORT}`;
 
@@ -85,8 +86,10 @@ webApp.post('/api/stop/:id', (req, res) => {
   if (!active) {
     return res.status(404).json({ error: 'Request not found or already completed', id: requestId });
   }
-  const { proxyReq, logEntry } = active;
+  const { proxyReq, logEntry, _watchdog } = active;
   console.log(`[STOP] Cancelling request ${requestId} (${logEntry.path})`);
+  // Clear watchdog timer
+  if (_watchdog) clearTimeout(_watchdog);
   // Destroy proxy request to Ollama
   try { proxyReq.destroy(); } catch(e) {}
   // Mark as stopped so downstream error handlers don't overwrite
@@ -340,7 +343,7 @@ const proxyServer = http.createServer((req, res) => {
         'content-length': requestBodyBuffer.length
       },
       agent: false, // nova konekcija za svaki request, izbegava keep-alive race condition
-      timeout: 600000 // 10 min — enough for long pull/chat requests
+      timeout: REQUEST_TIMEOUT_MS
     }, (proxyRes) => {
       logEntry.responseStatus = proxyRes.statusCode;
       logEntry.responseHeaders = proxyRes.headers;
@@ -407,30 +410,38 @@ const proxyServer = http.createServer((req, res) => {
               }
             } catch (e) { /* ignore parse errors */ }
           }
-          // Šalji live update svakih ~2s
+          // Šalji live update svakih ~2s — duration + decoded text
           const nowMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
           if (Math.floor(nowMs / 2000) !== Math.floor((nowMs - chunkStr.length) / 2000)) {
+            // Ažuriraj logEntry.decodedText za stream-decoded event
+            logEntry._streamDecoded = decodedText;
             webClients.forEach(socket => {
               socket.emit('live-duration', { id: logEntry.id, durationMs: nowMs });
+              if (decodedText) {
+                socket.emit('stream-decoded', { id: logEntry.id, text: decodedText });
+              }
             });
           }
         });
         
-    // Watchdog timer — ako streaming traje duze od 10 min, prekidamo
+    // Watchdog timer — prekidamo ako nema odgovora duže od STREAM_TIMEOUT_MS
     const watchdogTimer = setTimeout(() => {
+      if (logEntry._stopped || logEntry._clientGone) return;
       logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-      logEntry.error = 'Stream timeout - no response after 10 minutes';
+      logEntry.error = 'Stream timeout — bez odgovora posle ' + (STREAM_TIMEOUT_MS / 60000) + ' minuta';
       logEntry.status = 'error';
       logEntry.decodedText = '';
-      logEntry.responseBody = 'ERROR: Stream timed out after 10 minutes';
+      logEntry.responseBody = 'ERROR: Stream timed out after ' + (STREAM_TIMEOUT_MS / 60000) + ' minutes';
       logEntry.responseSize = 0;
       stopTick();
       addLog(logEntry);
-      console.log(`[PROXY] ${req.method} ${req.url} → TIMEOUT (${logEntry.durationMs.toFixed(0)}ms) [STREAM TIMEOUT]`);
+      console.log(`[PROXY] ${req.method} ${req.url} → WATCHDOG TIMEOUT (${(logEntry.durationMs / 1000 / 60).toFixed(1)}min) [STREAM]`);
       try { proxyRes.destroy(); } catch(e) {}
       try { if (!res.writableEnded) res.end(); } catch(e) {}
       delete activeRequests[requestId];
     }, STREAM_TIMEOUT_MS);
+    // Skladišti u activeRequests radi čišćenja iz drugih grana
+    activeRequests[requestId]._watchdog = watchdogTimer;
         
         proxyRes.on('end', () => {
           delete activeRequests[requestId];
@@ -508,11 +519,29 @@ const proxyServer = http.createServer((req, res) => {
         startTick();
         let fullResponse = '';
 
+        // Watchdog timer za non-streaming requeste
+        const nWatchdog = setTimeout(() => {
+          if (logEntry._stopped || logEntry._clientGone) return;
+          logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+          logEntry.error = 'Request timeout — bez odgovora posle ' + (REQUEST_TIMEOUT_MS / 60000) + ' minuta';
+          logEntry.status = 'error';
+          logEntry.responseBody = 'ERROR: Request timed out';
+          logEntry.responseSize = 0;
+          stopTick();
+          addLog(logEntry);
+          console.log(`[PROXY] ${req.method} ${req.url} → WATCHDOG TIMEOUT (${(logEntry.durationMs / 1000 / 60).toFixed(1)}min) [NON-STREAM]`);
+          try { proxyRes.destroy(); } catch(e) {}
+          try { if (!res.writableEnded) res.end(); } catch(e) {}
+          delete activeRequests[requestId];
+        }, REQUEST_TIMEOUT_MS);
+        activeRequests[requestId]._watchdog = nWatchdog;
+
         proxyRes.on('data', (chunk) => {
           fullResponse += chunk;
         });
 
         proxyRes.on('end', () => {
+          clearTimeout(nWatchdog);
           delete activeRequests[requestId];
           const endTime = process.hrtime.bigint();
           logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
@@ -584,13 +613,35 @@ const proxyServer = http.createServer((req, res) => {
           res.writeHead(proxyRes.statusCode, cleanHeaders);
           res.end(responseBuffer);
         });
+
+        proxyRes.on('error', (err) => {
+          clearTimeout(nWatchdog);
+          delete activeRequests[requestId];
+          if (logEntry._clientGone || logEntry._stopped) {
+            stopTick();
+            return;
+          }
+          logEntry.error = err.message;
+          logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+          logEntry.status = 'error';
+          stopTick();
+          addLog(logEntry);
+          console.log(`[PROXY ERROR] ${req.method} ${req.url} → ${err.message} [NON-STREAM]`);
+          if (!res.headersSent) res.writeHead(504);
+          res.end();
+        });
       }
     });
 
     proxyReq.on('error', (err) => {
+      // Ako je klijent već diskonektovao ili stopiran, ne loguj
+      if (logEntry._clientGone || logEntry._stopped) {
+        delete activeRequests[requestId];
+        return;
+      }
+      const active = activeRequests[requestId];
+      if (active && active._watchdog) { clearTimeout(active._watchdog); }
       delete activeRequests[requestId];
-      // Ako je klijent već diskonektovao, ne loguj
-      if (logEntry._clientGone || logEntry._stopped) return;
       logEntry.error = err.message;
       logEntry.status = 'error';
       stopTick();
@@ -604,16 +655,19 @@ const proxyServer = http.createServer((req, res) => {
       }
     });
 
-    // Timeout protection
+    // Node.js HTTP timeout protection (global safety net)
     proxyReq.on('timeout', () => {
+      if (logEntry._stopped || logEntry._clientGone) return;
+      const active = activeRequests[requestId];
+      if (active && active._watchdog) { clearTimeout(active._watchdog); }
       delete activeRequests[requestId];
       const endTime = process.hrtime.bigint();
       logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
-      logEntry.error = 'Timeout after 120s';
+      logEntry.error = 'Request timeout — Ollama nije odgovorila';
       logEntry.status = 'error';
       stopTick();
       addLog(logEntry);
-      console.error(`[PROXY] TIMEOUT: ${req.method} ${req.url} (${logEntry.durationMs.toFixed(0)}ms)`);
+      console.error(`[PROXY] TIMEOUT: ${req.method} ${req.url} (${(logEntry.durationMs / 1000 / 60).toFixed(1)}min)`);
       proxyReq.destroy();
       if (!res.headersSent) {
         res.statusCode = 504;
@@ -624,8 +678,10 @@ const proxyServer = http.createServer((req, res) => {
 
     // Memory leak protection: if client disconnects, destroy proxy request
     res.on('close', () => {
+      logEntry._clientGone = true;
+      const active = activeRequests[requestId];
+      if (active && active._watchdog) { clearTimeout(active._watchdog); }
       if (!res.writableEnded) {
-        logEntry._clientGone = true;
         proxyReq.destroy();
       }
       delete activeRequests[requestId];
