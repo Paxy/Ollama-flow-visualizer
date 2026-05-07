@@ -413,8 +413,9 @@ const proxyServer = http.createServer((req, res) => {
           // Šalji live update svakih ~2s — duration + decoded text
           const nowMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
           if (Math.floor(nowMs / 2000) !== Math.floor((nowMs - chunkStr.length) / 2000)) {
-            // Ažuriraj logEntry.decodedText za stream-decoded event
+            // Ažuriraj logEntry.decodedText za stream-decoded event (i frontend redraw)
             logEntry._streamDecoded = decodedText;
+            logEntry.decodedText = decodedText;
             webClients.forEach(socket => {
               socket.emit('live-duration', { id: logEntry.id, durationMs: nowMs });
               if (decodedText) {

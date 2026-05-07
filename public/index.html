@@ -1084,7 +1084,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!groupEl) return;
     const det = groupEl.querySelector('.g-det');
     if (!det || !det.classList.contains('open')) return; // ne ažuriraj skrivene grupe
-    const dp = det.querySelector('.decoded-prompt');
+    let dp = det.querySelector('.decoded-prompt');
+    if (!dp) {
+      // Prvi stream chunk — kreiraj .decoded-prompt element (ne postoji jer decodedText još nije finalizovan)
+      const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(data.text) + '</div></div>';
+      det.insertAdjacentHTML('afterbegin', newSec);
+      dp = det.querySelector('.decoded-prompt');
+    }
     if (dp) {
       dp.textContent = data.text;
       dp.scrollTop = dp.scrollHeight;
