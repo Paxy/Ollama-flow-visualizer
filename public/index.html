@@ -1084,15 +1084,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!groupEl) return;
     const det = groupEl.querySelector('.g-det');
     if (!det || !det.classList.contains('open')) return; // ne ažuriraj skrivene grupe
+
+    // Spoji prethodne done odgovore + trenutni streaming text
+    let fullText = '';
+    const seen = new Set();
+    match.items.forEach(item => {
+      // Preskoči streaming item — njegov text dodajemo na kraju
+      if (item.id === data.id) return;
+      if (item.decodedText) {
+        const txt = item.decodedText.trim();
+        if (txt && !seen.has(txt)) {
+          seen.add(txt);
+          fullText = fullText ? fullText + '\n\n---\n\n' + txt : txt;
+        }
+      }
+    });
+    // Dodaj trenutni streaming text (uvek na kraju, čak i ako je identičan nekom prethodnom)
+    fullText = fullText ? fullText + '\n\n---\n\n' + data.text : data.text;
+
     let dp = det.querySelector('.decoded-prompt');
     if (!dp) {
-      // Prvi stream chunk — kreiraj .decoded-prompt element (ne postoji jer decodedText još nije finalizovan)
-      const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(data.text) + '</div></div>';
+      // Prvi stream chunk — kreiraj .decoded-prompt element
+      const newSec = '<div class="detail-section"><span class="lbl">💬 Decoded response:</span><div class="decoded-prompt">' + escHtml(fullText) + '</div></div>';
       det.insertAdjacentHTML('afterbegin', newSec);
       dp = det.querySelector('.decoded-prompt');
     }
     if (dp) {
-      dp.textContent = data.text;
+      dp.textContent = fullText;
       dp.scrollTop = dp.scrollHeight;
     }
   });
