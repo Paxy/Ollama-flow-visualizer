@@ -427,7 +427,7 @@ const proxyServer = http.createServer((req, res) => {
         
     // Watchdog timer — prekidamo ako nema odgovora duže od STREAM_TIMEOUT_MS
     const watchdogTimer = setTimeout(() => {
-      if (logEntry._stopped || logEntry._clientGone) return;
+      if (logEntry._stopped || logEntry._clientGone || logEntry._closed) return;
       logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
       logEntry.error = 'Stream timeout — bez odgovora posle ' + (STREAM_TIMEOUT_MS / 60000) + ' minuta';
       logEntry.status = 'error';
@@ -447,7 +447,7 @@ const proxyServer = http.createServer((req, res) => {
         proxyRes.on('end', () => {
           delete activeRequests[requestId];
           clearTimeout(watchdogTimer);
-          if (logEntry._stopped) { stopTick(); return; }
+          if (logEntry._stopped || logEntry._closed) { stopTick(); return; }
           const endTime = process.hrtime.bigint();
           logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
           
@@ -500,8 +500,8 @@ const proxyServer = http.createServer((req, res) => {
         proxyRes.on('error', (err) => {
           delete activeRequests[requestId];
           clearTimeout(watchdogTimer);
-          // Ako je klijent diskonektovao, ne loguj kao grešku
-          if (logEntry._clientGone || logEntry._stopped) {
+          // Ako je klijent diskonektovao ili već zatvoreno, ne loguj ponovo
+          if (logEntry._clientGone || logEntry._stopped || logEntry._closed) {
             stopTick();
             return;
           }
@@ -522,7 +522,7 @@ const proxyServer = http.createServer((req, res) => {
 
         // Watchdog timer za non-streaming requeste
         const nWatchdog = setTimeout(() => {
-          if (logEntry._stopped || logEntry._clientGone) return;
+          if (logEntry._stopped || logEntry._clientGone || logEntry._closed) return;
           logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
           logEntry.error = 'Request timeout — bez odgovora posle ' + (REQUEST_TIMEOUT_MS / 60000) + ' minuta';
           logEntry.status = 'error';
@@ -544,6 +544,7 @@ const proxyServer = http.createServer((req, res) => {
         proxyRes.on('end', () => {
           clearTimeout(nWatchdog);
           delete activeRequests[requestId];
+          if (logEntry._closed) { stopTick(); return; }
           const endTime = process.hrtime.bigint();
           logEntry.durationMs = Number(endTime - startTime) / 1_000_000;
 
@@ -618,7 +619,7 @@ const proxyServer = http.createServer((req, res) => {
         proxyRes.on('error', (err) => {
           clearTimeout(nWatchdog);
           delete activeRequests[requestId];
-          if (logEntry._clientGone || logEntry._stopped) {
+          if (logEntry._clientGone || logEntry._stopped || logEntry._closed) {
             stopTick();
             return;
           }
@@ -635,8 +636,8 @@ const proxyServer = http.createServer((req, res) => {
     });
 
     proxyReq.on('error', (err) => {
-      // Ako je klijent već diskonektovao ili stopiran, ne loguj
-      if (logEntry._clientGone || logEntry._stopped) {
+      // Ako je klijent već diskonektovao, stopiran ili zatvoren, ne loguj
+      if (logEntry._clientGone || logEntry._stopped || logEntry._closed) {
         delete activeRequests[requestId];
         return;
       }
@@ -658,7 +659,7 @@ const proxyServer = http.createServer((req, res) => {
 
     // Node.js HTTP timeout protection (global safety net)
     proxyReq.on('timeout', () => {
-      if (logEntry._stopped || logEntry._clientGone) return;
+      if (logEntry._stopped || logEntry._clientGone || logEntry._closed) return;
       const active = activeRequests[requestId];
       if (active && active._watchdog) { clearTimeout(active._watchdog); }
       delete activeRequests[requestId];
@@ -679,11 +680,24 @@ const proxyServer = http.createServer((req, res) => {
 
     // Memory leak protection: if client disconnects, destroy proxy request
     res.on('close', () => {
+      if (logEntry._closed) return; // guard against double-fire
+      logEntry._closed = true;
       logEntry._clientGone = true;
       const active = activeRequests[requestId];
       if (active && active._watchdog) { clearTimeout(active._watchdog); }
       if (!res.writableEnded) {
         proxyReq.destroy();
+      }
+      // Ažuriraj status da ne ostane zaglavljen u 'streaming'/'pending'
+      const wasActive = logEntry.status === 'streaming' || logEntry.status === 'pending';
+      if (wasActive && !logEntry.error) {
+        logEntry.error = 'Client disconnected';
+      }
+      if (wasActive) {
+        logEntry.durationMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+        logEntry.status = 'error';
+        stopTick();
+        addLog(logEntry);
       }
       delete activeRequests[requestId];
     });
